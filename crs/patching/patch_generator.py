@@ -57,7 +57,18 @@ class PatchGenerator:
         "Do not perform unrelated refactors or touch any file except the affected file.\n"
         "Do not add dependencies unless absolutely necessary.\n"
         "Do not claim the patch is verified. Do not execute or apply the patch.\n"
-        "Return only structured output matching PatchProposal, including a unified diff."
+        "Return only structured output matching PatchProposal.\n"
+        "The unified_diff field MUST contain a valid single-file unified diff.\n"
+        "Use exactly one --- a/<file> header and one +++ b/<file> header.\n"
+        "Prefer exactly one minimal hunk containing only changed lines and no context lines.\n"
+        "Every hunk body line MUST start with exactly one of space, +, or -.\n"
+        "Never put an unprefixed blank line inside a hunk.\n"
+        "If replacing one source line, use this exact shape:\n"
+        "--- a/<file>\n"
+        "+++ b/<file>\n"
+        "@@ -<line>,1 +<line>,1 @@\n"
+        "-<exact old source line>\n"
+        "+<replacement source line>"
     )
 
     def __init__(
@@ -106,10 +117,18 @@ class PatchGenerator:
     ) -> str:
         guarded_code = self.prompt_firewall.wrap_untrusted_code(code_context)
         request = {
-            "finding": finding.model_dump(mode="json"),
-            "reasoning": reasoning.model_dump(mode="json"),
+            "finding_id": finding.finding_id,
+            "vulnerability_type": finding.vulnerability_type,
             "affected_file": code_context.file,
+            "affected_line": finding.line_start,
+            "scanner_message": finding.title,
+            "root_cause": reasoning.root_cause,
+            "remediation_strategy": reasoning.remediation_strategy,
             "code_context": guarded_code,
-            "required_schema": PatchProposal.model_json_schema(),
         }
-        return f"{self.SYSTEM_INSTRUCTIONS}\nPATCH_REQUEST_DATA\n{json.dumps(request, ensure_ascii=False, sort_keys=True)}"
+        return (
+            f"{self.SYSTEM_INSTRUCTIONS}\n"
+            "Use finding_id and affected_file exactly as supplied. "
+            "Copy the removed source line exactly from the evidence before replacing it.\n"
+            f"PATCH_REQUEST_DATA\n{json.dumps(request, ensure_ascii=False, sort_keys=True)}"
+        )
