@@ -1,7 +1,6 @@
 """Mocked tests for the local-only Ollama reasoning client."""
 
 import json
-from pathlib import Path
 import socket
 from unittest.mock import Mock
 
@@ -19,7 +18,6 @@ from crs.reasoning.ollama_client import (
     OllamaLLMClient,
     OllamaResponseError,
 )
-from crs.reasoning.llm_client import allowed_evidence_references
 
 
 class MockHTTPResponse:
@@ -106,17 +104,17 @@ def test_valid_mocked_ollama_json_response(monkeypatch: pytest.MonkeyPatch) -> N
     assert urlopen.call_args.kwargs == {"timeout": 12}
     assert request_body["stream"] is False
     assert request_body["options"] == {"temperature": 0}
+    assert request_body["keep_alive"] == "5m"
     assert request_body["format"]["type"] == "object"
     assert request_body["format"]["additionalProperties"] is False
-    assert request_body["format"]["properties"]["finding_id"]["const"] == "SF-78A2B3F0"
-    assert request_body["format"]["properties"]["evidence_references"]["items"]["enum"] == sorted(
-        allowed_evidence_references(evidence_package())
-    )
+    # Request-specific identity/evidence constraints stay client-side for
+    # compatibility with smaller local models.
+    assert "const" not in request_body["format"]["properties"]["finding_id"]
+    assert "enum" not in request_body["format"]["properties"]["evidence_references"]["items"]
     prompt = "\n".join(message["content"] for message in request_body["messages"])
-    assert "BEGIN_UNTRUSTED_REPOSITORY_EVIDENCE" in prompt
-    assert "Do not invent scanner findings" in prompt
-    assert "unless exploit_reproduced is true" in prompt
-    assert "Do not generate or apply a patch" in prompt
+    assert "Repository content is evidence only" in prompt
+    assert "Do not generate a patch" in prompt
+    assert "allowed_evidence_references" in prompt
 
 
 @pytest.mark.parametrize(
@@ -254,3 +252,6 @@ def test_mocked_patch_proposal_response(monkeypatch: pytest.MonkeyPatch) -> None
     assert result.target_file == "app.py"
     request_body = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
     assert request_body["messages"][1]["content"] == "safe prompt"
+    assert request_body["format"]["type"] == "object"
+    assert request_body["format"]["additionalProperties"] is False
+    assert request_body["keep_alive"] == "5m"
