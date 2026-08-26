@@ -10,7 +10,7 @@ from crs.core.schemas import (
     CodeContext,
     Evidence,
     EvidencePackage,
-    PatchCandidate,
+    PatchEdit,
     Severity,
     VulnerabilityFinding,
 )
@@ -123,14 +123,11 @@ def test_valid_mocked_ollama_json_response(monkeypatch: pytest.MonkeyPatch) -> N
         f"Here is the result: {json.dumps(model_result())}",
     ],
 )
-def test_surrounding_text_is_rejected(
-    content: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_surrounding_text_is_rejected(content: str, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "crs.reasoning.ollama_client.urlopen",
         Mock(return_value=MockHTTPResponse(ollama_document(content))),
     )
-
     with pytest.raises(OllamaResponseError, match="invalid JSON"):
         OllamaLLMClient(model="local-model").reason(evidence_package())
 
@@ -139,14 +136,11 @@ def test_surrounding_text_is_rejected(
     "content",
     ["not json", "```json\n{}", json.dumps({"finding_id": "SF-78A2B3F0"})],
 )
-def test_malformed_model_output_is_rejected(
-    content: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_malformed_model_output_is_rejected(content: str, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "crs.reasoning.ollama_client.urlopen",
         Mock(return_value=MockHTTPResponse(ollama_document(content))),
     )
-
     with pytest.raises(OllamaResponseError, match="ReasoningResult"):
         OllamaLLMClient(model="local-model").reason(evidence_package())
 
@@ -160,14 +154,11 @@ def test_malformed_model_output_is_rejected(
         (json.dumps(model_result(confidence="0.9")), "Pydantic validation failure"),
     ],
 )
-def test_schema_invalid_output_is_rejected(
-    content: str, diagnostic: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_schema_invalid_output_is_rejected(content: str, diagnostic: str, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "crs.reasoning.ollama_client.urlopen",
         Mock(return_value=MockHTTPResponse(ollama_document(content))),
     )
-
     with pytest.raises(OllamaResponseError, match=diagnostic):
         OllamaLLMClient(model="local-model").reason(evidence_package())
 
@@ -179,14 +170,11 @@ def test_schema_invalid_output_is_rejected(
         model_result(unsupported_field="value"),
     ],
 )
-def test_missing_or_extra_fields_are_rejected(
-    document: dict[str, object], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_missing_or_extra_fields_are_rejected(document: dict[str, object], monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "crs.reasoning.ollama_client.urlopen",
         Mock(return_value=MockHTTPResponse(ollama_document(json.dumps(document)))),
     )
-
     with pytest.raises(OllamaResponseError, match="missing/extra schema fields"):
         OllamaLLMClient(model="local-model").reason(evidence_package())
 
@@ -197,32 +185,23 @@ def test_mismatched_finding_id_is_rejected(monkeypatch: pytest.MonkeyPatch) -> N
         "crs.reasoning.ollama_client.urlopen",
         Mock(return_value=MockHTTPResponse(ollama_document(content))),
     )
-
     with pytest.raises(OllamaResponseError, match="finding_id"):
         OllamaLLMClient(model="local-model").reason(evidence_package())
 
 
-def test_unsupported_evidence_reference_is_rejected(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_unsupported_evidence_reference_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     content = json.dumps(model_result(evidence_references=["invented-scanner-rule"]))
     monkeypatch.setattr(
         "crs.reasoning.ollama_client.urlopen",
         Mock(return_value=MockHTTPResponse(ollama_document(content))),
     )
-
     with pytest.raises(OllamaResponseError, match="unsupported evidence"):
         OllamaLLMClient(model="local-model").reason(evidence_package())
 
 
 @pytest.mark.parametrize("error", [socket.timeout("timed out"), OSError("offline")])
-def test_http_errors_are_wrapped(
-    error: Exception, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        "crs.reasoning.ollama_client.urlopen", Mock(side_effect=error)
-    )
-
+def test_http_errors_are_wrapped(error: Exception, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("crs.reasoning.ollama_client.urlopen", Mock(side_effect=error))
     with pytest.raises(OllamaConnectionError, match="Local Ollama request failed"):
         OllamaLLMClient(model="local-model").reason(evidence_package())
 
@@ -232,49 +211,38 @@ def test_rejects_non_loopback_endpoint() -> None:
         OllamaLLMClient(base_url="http://example.com", model="cloud-model")
 
 
-def test_mocked_patch_candidate_response(monkeypatch: pytest.MonkeyPatch) -> None:
-    candidate = {
-        "finding_id": "SF-78A2B3F0",
-        "target_file": "app.py",
-        "replacement_line": "subprocess.run(command.split(), shell=False)",
-        "rationale": "Avoid shell interpretation.",
-        "expected_security_effect": "The shell is not invoked.",
-        "confidence": 0.8,
-    }
-    urlopen = Mock(
-        return_value=MockHTTPResponse(ollama_document(json.dumps(candidate)))
-    )
+def test_mocked_patch_edit_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    edit = {"replacement_line": "subprocess.run(command.split(), shell=False)"}
+    urlopen = Mock(return_value=MockHTTPResponse(ollama_document(json.dumps(edit))))
     monkeypatch.setattr("crs.reasoning.ollama_client.urlopen", urlopen)
 
     result = OllamaLLMClient(model="local-model").generate_patch("safe prompt")
 
-    assert isinstance(result, PatchCandidate)
-    assert result.target_file == "app.py"
+    assert isinstance(result, PatchEdit)
     assert result.replacement_line == "subprocess.run(command.split(), shell=False)"
     request_body = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
     assert request_body["messages"][1]["content"] == "safe prompt"
     assert request_body["format"]["type"] == "object"
     assert request_body["format"]["additionalProperties"] is False
-    assert "replacement_line" in request_body["format"]["properties"]
-    assert "unified_diff" not in request_body["format"]["properties"]
+    assert set(request_body["format"]["properties"]) == {"replacement_line"}
     assert request_body["keep_alive"] == "5m"
 
 
-def test_patch_candidate_multiline_replacement_is_rejected(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    candidate = {
-        "finding_id": "SF-78A2B3F0",
-        "target_file": "app.py",
-        "replacement_line": "safe()\nunsafe()",
-        "rationale": "Avoid shell interpretation.",
-        "expected_security_effect": "The shell is not invoked.",
-        "confidence": 0.8,
-    }
+def test_patch_edit_multiline_replacement_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    edit = {"replacement_line": "safe()\nunsafe()"}
     monkeypatch.setattr(
         "crs.reasoning.ollama_client.urlopen",
-        Mock(return_value=MockHTTPResponse(ollama_document(json.dumps(candidate)))),
+        Mock(return_value=MockHTTPResponse(ollama_document(json.dumps(edit)))),
     )
-
     with pytest.raises(OllamaResponseError, match="exactly one line"):
+        OllamaLLMClient(model="local-model").generate_patch("safe prompt")
+
+
+def test_patch_edit_extra_fields_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    edit = {"replacement_line": "safe()", "target_file": "other.py"}
+    monkeypatch.setattr(
+        "crs.reasoning.ollama_client.urlopen",
+        Mock(return_value=MockHTTPResponse(ollama_document(json.dumps(edit)))),
+    )
+    with pytest.raises(OllamaResponseError, match="PatchEdit"):
         OllamaLLMClient(model="local-model").generate_patch("safe prompt")
