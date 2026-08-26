@@ -81,15 +81,10 @@ class ReasoningResult(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
 
-class PatchCandidate(BaseModel):
-    """Model-proposed single-line edit intent before deterministic diff construction."""
+class PatchEdit(BaseModel):
+    """Minimal model-proposed edit intent before trusted patch construction."""
 
-    finding_id: str
-    target_file: str
     replacement_line: str
-    rationale: str
-    expected_security_effect: str
-    confidence: float = Field(ge=0.0, le=1.0)
 
 
 class PatchProposal(BaseModel):
