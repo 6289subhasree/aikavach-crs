@@ -2,12 +2,14 @@
 
 from collections.abc import Callable
 import json
+import re
 from typing import Protocol
 
 from pydantic import ValidationError
 
 from crs.core.schemas import (
     CodeContext,
+    PatchCandidate,
     PatchProposal,
     ReasoningResult,
     VulnerabilityFinding,
@@ -21,10 +23,10 @@ class PatchGenerationError(ValueError):
 
 
 class PatchLLMClient(Protocol):
-    """Tool-free interface for structured patch proposal generation."""
+    """Tool-free interface for structured patch edit-intent generation."""
 
-    def generate_patch(self, prompt: str) -> PatchProposal | dict[str, object]:
-        """Return structured patch data without applying it."""
+    def generate_patch(self, prompt: str) -> PatchCandidate | dict[str, object]:
+        """Return structured single-line edit intent without applying it."""
         ...
 
 
@@ -33,14 +35,14 @@ class FakePatchLLMClient:
 
     def __init__(
         self,
-        result: PatchProposal
+        result: PatchCandidate
         | dict[str, object]
-        | Callable[[str], PatchProposal | dict[str, object]],
+        | Callable[[str], PatchCandidate | dict[str, object]],
     ) -> None:
         self.result = result
         self.last_prompt: str | None = None
 
-    def generate_patch(self, prompt: str) -> PatchProposal | dict[str, object]:
+    def generate_patch(self, prompt: str) -> PatchCandidate | dict[str, object]:
         self.last_prompt = prompt
         return self.result(prompt) if callable(self.result) else self.result
 
@@ -57,19 +59,11 @@ class PatchGenerator:
         "Do not perform unrelated refactors or touch any file except the affected file.\n"
         "Do not add dependencies unless absolutely necessary.\n"
         "Do not claim the patch is verified. Do not execute or apply the patch.\n"
-        "Return only structured output matching PatchProposal.\n"
-        "The unified_diff field MUST contain a valid single-file unified diff.\n"
-        "Use exactly one --- a/<file> header and one +++ b/<file> header.\n"
-        "Prefer exactly one minimal hunk containing only changed lines and no context lines.\n"
-        "Every hunk body line MUST start with exactly one of space, +, or -.\n"
-        "Never put an unprefixed blank line inside a hunk.\n"
-        "If replacing one source line, use this exact shape:\n"
-        "--- a/<file>\n"
-        "+++ b/<file>\n"
-        "@@ -<line>,1 +<line>,1 @@\n"
-        "-<exact old source line>\n"
-        "+<replacement source line>"
+        "Return structured output matching PatchCandidate.\n"
+        "Do not generate a diff. Return only one replacement source line."
     )
+
+    LINE_PREFIX = re.compile(r"^(\d+): ?(.*)$")
 
     def __init__(
         self,
@@ -87,21 +81,62 @@ class PatchGenerator:
         reasoning: ReasoningResult,
         code_context: CodeContext,
     ) -> PatchProposal:
-        """Generate a proposal in memory; never execute, write, or apply it."""
+        """Generate edit intent, construct canonical diff, and validate it in memory."""
 
         if reasoning.finding_id != finding.finding_id:
             raise PatchGenerationError(
                 "Reasoning finding_id does not match the input finding"
             )
+        if finding.line_start is None or finding.line_end not in {None, finding.line_start}:
+            raise PatchGenerationError(
+                "MVP patch generation currently requires a single-line finding"
+            )
+
         prompt = self._build_prompt(finding, reasoning, code_context)
         try:
-            proposal = PatchProposal.model_validate(
+            candidate = PatchCandidate.model_validate(
                 self.llm_client.generate_patch(prompt)
             )
         except ValidationError as exc:
             raise PatchGenerationError(
                 "Patch client returned malformed structured output"
             ) from exc
+
+        if candidate.finding_id != finding.finding_id:
+            raise PatchGenerationError(
+                "Patch candidate finding_id does not match the input finding"
+            )
+        if candidate.target_file.replace("\\", "/") != code_context.file.replace("\\", "/"):
+            raise PatchGenerationError(
+                "Patch candidate target_file does not match the affected file"
+            )
+        if "\n" in candidate.replacement_line or "\r" in candidate.replacement_line:
+            raise PatchGenerationError(
+                "Patch candidate replacement_line must contain exactly one line"
+            )
+
+        old_line = self._source_line(code_context, finding.line_start)
+        if candidate.replacement_line == old_line:
+            raise PatchGenerationError("Patch candidate does not change the affected line")
+
+        target_file = code_context.file.replace("\\", "/")
+        line_number = finding.line_start
+        unified_diff = (
+            f"--- a/{target_file}\n"
+            f"+++ b/{target_file}\n"
+            f"@@ -{line_number},1 +{line_number},1 @@\n"
+            f"-{old_line}\n"
+            f"+{candidate.replacement_line}\n"
+        )
+        proposal = PatchProposal(
+            finding_id=candidate.finding_id,
+            target_file=target_file,
+            rationale=candidate.rationale,
+            unified_diff=unified_diff,
+            expected_security_effect=candidate.expected_security_effect,
+            confidence=candidate.confidence,
+        )
+
         validation = self.validator.validate(
             proposal, finding, intended_file=code_context.file
         )
@@ -129,6 +164,19 @@ class PatchGenerator:
         return (
             f"{self.SYSTEM_INSTRUCTIONS}\n"
             "Use finding_id and affected_file exactly as supplied. "
-            "Copy the removed source line exactly from the evidence before replacing it.\n"
+            "replacement_line must be complete source code for the affected line, "
+            "with indentation preserved and no line-number prefix.\n"
             f"PATCH_REQUEST_DATA\n{json.dumps(request, ensure_ascii=False, sort_keys=True)}"
+        )
+
+    @classmethod
+    def _source_line(cls, code_context: CodeContext, line_number: int) -> str:
+        """Recover one exact source line from bounded numbered evidence."""
+
+        for line in code_context.content.splitlines():
+            match = cls.LINE_PREFIX.fullmatch(line)
+            if match and int(match.group(1)) == line_number:
+                return match.group(2)
+        raise PatchGenerationError(
+            f"Affected source line {line_number} is not present in bounded code context"
         )
