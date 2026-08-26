@@ -1,0 +1,5 @@
+pydantic>=2.0
+pytest>=8.0
+
+# Static-analysis tool
+semgrep>=1.0
