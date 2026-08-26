@@ -18,13 +18,7 @@ from crs.reasoning.llm_client import FakeLLMClient
 
 
 SOURCE = "subprocess.run(command, shell=True, check=False)\n"
-DIFF = (
-    "--- a/app.py\n"
-    "+++ b/app.py\n"
-    "@@ -1,1 +1,1 @@\n"
-    "-subprocess.run(command, shell=True, check=False)\n"
-    "+subprocess.run(command.split(), shell=False, check=False)\n"
-)
+SAFE_REPLACEMENT = "subprocess.run(command.split(), shell=False, check=False)"
 
 
 def repository(tmp_path: Path) -> Path:
@@ -73,15 +67,10 @@ def reasoning(confidence: float = 0.9) -> dict[str, object]:
     }
 
 
-def patch(target_file: str = "app.py") -> dict[str, object]:
-    return {
-        "finding_id": "SF-TEST",
-        "target_file": target_file,
-        "rationale": "Avoid shell interpretation.",
-        "unified_diff": DIFF,
-        "expected_security_effect": "No shell=True call remains.",
-        "confidence": 0.85,
-    }
+def patch_edit(replacement_line: str = SAFE_REPLACEMENT) -> dict[str, object]:
+    """Return the minimal model output expected at the PatchEdit trust boundary."""
+
+    return {"replacement_line": replacement_line}
 
 
 def verification(approved: bool = True) -> VerificationResult:
@@ -103,7 +92,7 @@ def pipeline(root: Path, *, approved: bool = True) -> tuple[CRSPipeline, Mock]:
     return (
         CRSPipeline(
             reasoning_client=FakeLLMClient(reasoning()),
-            patch_client=FakePatchLLMClient(patch()),
+            patch_client=FakePatchLLMClient(patch_edit()),
             scanner=scanner,
             verifier=verifier,
         ),
@@ -122,6 +111,13 @@ def test_happy_path_uses_fake_dependencies_and_preserves_original(
     assert result.finding.finding_id == "SF-TEST"
     assert isinstance(result.reasoning, ReasoningResult)
     assert result.patch.target_file == "app.py"
+    assert result.patch.unified_diff == (
+        "--- a/app.py\n"
+        "+++ b/app.py\n"
+        "@@ -1,1 +1,1 @@\n"
+        "-subprocess.run(command, shell=True, check=False)\n"
+        "+subprocess.run(command.split(), shell=False, check=False)\n"
+    )
     assert result.verification.approved is True
     verifier.verify.assert_called_once()
     assert (root / "app.py").read_text(encoding="utf-8") == SOURCE
@@ -133,7 +129,7 @@ def test_no_findings_has_clear_stage_error(tmp_path: Path) -> None:
     scanner.scan.return_value = []
     subject = CRSPipeline(
         reasoning_client=FakeLLMClient(reasoning()),
-        patch_client=FakePatchLLMClient(patch()),
+        patch_client=FakePatchLLMClient(patch_edit()),
         scanner=scanner,
         verifier=Mock(),
     )
@@ -148,7 +144,7 @@ def test_reasoning_failure_is_reported(tmp_path: Path) -> None:
     scanner.scan.return_value = [finding(root)]
     subject = CRSPipeline(
         reasoning_client=FakeLLMClient(reasoning(confidence=2.0)),
-        patch_client=FakePatchLLMClient(patch()),
+        patch_client=FakePatchLLMClient(patch_edit()),
         scanner=scanner,
         verifier=Mock(),
     )
@@ -163,7 +159,7 @@ def test_patch_validation_failure_is_reported(tmp_path: Path) -> None:
     scanner.scan.return_value = [finding(root)]
     subject = CRSPipeline(
         reasoning_client=FakeLLMClient(reasoning()),
-        patch_client=FakePatchLLMClient(patch("other.py")),
+        patch_client=FakePatchLLMClient(patch_edit("safe()\nunsafe()")),
         scanner=scanner,
         verifier=Mock(),
     )
