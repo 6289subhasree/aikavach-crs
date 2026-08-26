@@ -2,7 +2,7 @@
 
 from enum import Enum
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Severity(str, Enum):
@@ -84,6 +84,7 @@ class ReasoningResult(BaseModel):
 class PatchEdit(BaseModel):
     """Minimal model-proposed edit intent before trusted patch construction."""
 
+    model_config = ConfigDict(extra="forbid")
     replacement_line: str
 
 
