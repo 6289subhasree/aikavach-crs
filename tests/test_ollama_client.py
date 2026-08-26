@@ -10,6 +10,7 @@ from crs.core.schemas import (
     CodeContext,
     Evidence,
     EvidencePackage,
+    PatchCandidate,
     Severity,
     VulnerabilityFinding,
 )
@@ -107,8 +108,6 @@ def test_valid_mocked_ollama_json_response(monkeypatch: pytest.MonkeyPatch) -> N
     assert request_body["keep_alive"] == "5m"
     assert request_body["format"]["type"] == "object"
     assert request_body["format"]["additionalProperties"] is False
-    # Request-specific identity/evidence constraints stay client-side for
-    # compatibility with smaller local models.
     assert "const" not in request_body["format"]["properties"]["finding_id"]
     assert "enum" not in request_body["format"]["properties"]["evidence_references"]["items"]
     prompt = "\n".join(message["content"] for message in request_body["messages"])
@@ -233,25 +232,49 @@ def test_rejects_non_loopback_endpoint() -> None:
         OllamaLLMClient(base_url="http://example.com", model="cloud-model")
 
 
-def test_mocked_patch_proposal_response(monkeypatch: pytest.MonkeyPatch) -> None:
-    proposal = {
+def test_mocked_patch_candidate_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    candidate = {
         "finding_id": "SF-78A2B3F0",
         "target_file": "app.py",
+        "replacement_line": "subprocess.run(command.split(), shell=False)",
         "rationale": "Avoid shell interpretation.",
-        "unified_diff": "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new\n",
         "expected_security_effect": "The shell is not invoked.",
         "confidence": 0.8,
     }
     urlopen = Mock(
-        return_value=MockHTTPResponse(ollama_document(json.dumps(proposal)))
+        return_value=MockHTTPResponse(ollama_document(json.dumps(candidate)))
     )
     monkeypatch.setattr("crs.reasoning.ollama_client.urlopen", urlopen)
 
     result = OllamaLLMClient(model="local-model").generate_patch("safe prompt")
 
+    assert isinstance(result, PatchCandidate)
     assert result.target_file == "app.py"
+    assert result.replacement_line == "subprocess.run(command.split(), shell=False)"
     request_body = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
     assert request_body["messages"][1]["content"] == "safe prompt"
     assert request_body["format"]["type"] == "object"
     assert request_body["format"]["additionalProperties"] is False
+    assert "replacement_line" in request_body["format"]["properties"]
+    assert "unified_diff" not in request_body["format"]["properties"]
     assert request_body["keep_alive"] == "5m"
+
+
+def test_patch_candidate_multiline_replacement_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = {
+        "finding_id": "SF-78A2B3F0",
+        "target_file": "app.py",
+        "replacement_line": "safe()\nunsafe()",
+        "rationale": "Avoid shell interpretation.",
+        "expected_security_effect": "The shell is not invoked.",
+        "confidence": 0.8,
+    }
+    monkeypatch.setattr(
+        "crs.reasoning.ollama_client.urlopen",
+        Mock(return_value=MockHTTPResponse(ollama_document(json.dumps(candidate)))),
+    )
+
+    with pytest.raises(OllamaResponseError, match="exactly one line"):
+        OllamaLLMClient(model="local-model").generate_patch("safe prompt")
