@@ -36,6 +36,7 @@ def run_result(approved: bool = True) -> CRSRunResult:
             path="C:/repository",
             languages=["Python"],
             file_count=1,
+            repository_hash="abc123",
         ),
         finding=finding,
         reasoning=ReasoningResult(
@@ -89,19 +90,25 @@ def test_render_result_can_omit_timing() -> None:
     assert "TOTAL RUN TIME" not in output
 
 
-def test_main_uses_injected_pipeline_without_network(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_main_uses_injected_pipeline_and_writes_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     pipeline = Mock()
     pipeline.run.return_value = run_result(True)
     monkeypatch.setattr(demo, "pipeline_from_environment", lambda: pipeline)
+    monkeypatch.setenv("AIKAVACH_OLLAMA_MODEL", "local-model")
 
-    exit_code = demo.main(["sample"])
+    artifacts = tmp_path / "artifacts"
+    exit_code = demo.main(["sample", "--artifacts-dir", str(artifacts)])
 
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "FINAL DECISION : VERIFIED" in output
     assert "TOTAL RUN TIME :" in output
+    assert f"PROVENANCE RECORD : {artifacts / 'latest_run.json'}" in output
+    assert (artifacts / "latest_run.json").is_file()
     pipeline.run.assert_called_once_with(str(Path("sample").expanduser()))
 
 
