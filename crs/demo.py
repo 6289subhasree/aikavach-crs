@@ -10,6 +10,7 @@ from crs.core.schemas import CRSRunResult
 from crs.orchestrator import CRSPipeline, PipelineError
 from crs.reasoning.ollama_client import OllamaClientError, OllamaLLMClient
 from crs.reasoning.ollama_config import format_ollama_diagnostics, load_ollama_config
+from crs.reporting.provenance import build_run_provenance, write_run_provenance
 
 
 RULE = "=" * 68
@@ -20,6 +21,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run the AIKavach Find -> Reason -> Patch -> Verify demo."
     )
     parser.add_argument("target_path", help="Repository directory to analyze")
+    parser.add_argument(
+        "--artifacts-dir",
+        default="artifacts",
+        help="Directory for machine-readable provenance records (default: artifacts)",
+    )
     return parser
 
 
@@ -122,8 +128,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"TOTAL RUN TIME : {elapsed:.2f}s", file=sys.stderr)
         print(RULE, file=sys.stderr)
         return 1
+
     elapsed = perf_counter() - started
+    config = load_ollama_config()
+    provenance = build_run_provenance(
+        result,
+        model=config.model,
+        elapsed_seconds=elapsed,
+    )
+    _, latest_path = write_run_provenance(
+        provenance,
+        output_dir=args.artifacts_dir,
+    )
+
     print(render_result(result, elapsed_seconds=elapsed))
+    print(f"PROVENANCE RECORD : {latest_path}")
     return 0 if result.verification.approved else 2
 
 
