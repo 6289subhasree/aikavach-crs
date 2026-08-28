@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Load source repositories into the common analysis target schema."""
 
 from collections.abc import Iterable

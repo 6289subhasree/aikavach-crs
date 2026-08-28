@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Fail-closed orchestration for isolated patch verification."""
 
 from pathlib import Path

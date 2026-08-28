@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Deterministic static-analysis components for AIKavach CRS."""
 
 from crs.static_analysis.normalizer import SemgrepNormalizer

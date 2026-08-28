@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Deterministic structural validation for unapplied unified diffs."""
 
 from pathlib import Path, PurePosixPath, PureWindowsPath

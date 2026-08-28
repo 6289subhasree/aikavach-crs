@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Atomic, in-process application of one validated unified diff."""
 
 from pathlib import Path, PurePosixPath, PureWindowsPath

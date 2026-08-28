@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Optional manual Semgrep-to-Ollama integration helper."""
 
 from crs.ingestion.repository_loader import RepositoryLoader

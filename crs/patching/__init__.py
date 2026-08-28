@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Safe, proposal-only source patch generation and validation."""
 
 from crs.patching.patch_generator import (

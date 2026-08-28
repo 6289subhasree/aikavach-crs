@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Command-line demo for the complete AIKavach CRS MVP."""
 
 import argparse

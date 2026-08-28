@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Structured, local-only Ollama client for vulnerability reasoning."""
 
 import ipaddress

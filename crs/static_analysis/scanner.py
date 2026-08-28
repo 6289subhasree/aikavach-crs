@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Orchestration for deterministic repository static analysis."""
 
 from crs.core.schemas import VulnerabilityFinding

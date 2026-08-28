@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Environment-backed configuration for the local Ollama client."""
 
 from dataclasses import dataclass

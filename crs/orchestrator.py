@@ -1,3 +1,4 @@
+from __future__ import annotations
 """End-to-end composition for the AIKavach CRS MVP workflow."""
 
 from crs.core.schemas import CRSRunResult

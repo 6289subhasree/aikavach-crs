@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Guarded, proposal-only patch generation using an injected client."""
 
 from collections.abc import Callable

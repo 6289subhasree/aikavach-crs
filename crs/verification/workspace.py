@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Temporary repository copies for side-effect-free verification."""
 
 import os

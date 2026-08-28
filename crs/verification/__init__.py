@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Isolated, deterministic verification of unapplied patch proposals."""
 
 from crs.verification.patch_applier import PatchApplicationError, PatchApplier

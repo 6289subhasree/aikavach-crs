@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Build minimal, local source evidence for one vulnerability finding."""
 
 from pathlib import Path

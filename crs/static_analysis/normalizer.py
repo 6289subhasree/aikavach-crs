@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Normalize raw Semgrep findings into shared CRS security schemas."""
 
 import hashlib

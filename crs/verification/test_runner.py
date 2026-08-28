@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Deterministic Python build and project-test execution."""
 
 from dataclasses import dataclass

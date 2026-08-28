@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Dedicated safe security properties and original-finding Semgrep checks."""
 
 import ast

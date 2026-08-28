@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Deterministic instruction/data separation for repository source text."""
 
 import json

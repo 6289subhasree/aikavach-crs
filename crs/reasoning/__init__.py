@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Evidence-packaged, guarded vulnerability reasoning."""
 
 from crs.reasoning.evidence_builder import EvidenceBuilder

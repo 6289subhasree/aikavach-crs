@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Provider-neutral reasoning client contracts and deterministic test client."""
 
 from collections.abc import Callable

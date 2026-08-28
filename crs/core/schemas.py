@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Shared data contracts for the AIKavach CRS pipeline."""
 
 from enum import Enum

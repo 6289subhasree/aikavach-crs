@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Orchestrate evidence construction, prompt guarding, and structured reasoning."""
 
 from crs.core.schemas import EvidencePackage, ReasoningResult, VulnerabilityFinding

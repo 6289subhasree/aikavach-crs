@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Subprocess boundary for executing Semgrep and parsing its JSON output."""
 
 import json
