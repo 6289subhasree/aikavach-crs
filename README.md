@@ -8,6 +8,27 @@ The current MVP scans a repository for a known vulnerability pattern, uses a loc
 
 The model does not get the final say. A patch is accepted only if verification passes.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    A[Source Code] --> B[Semgrep Scan]
+    B --> C[Bounded Evidence]
+    C --> D[Local Ollama Reasoning]
+    D --> E[PatchEdit Intent]
+    E --> F[Trusted Patch Builder]
+    F --> G[Temporary Workspace]
+    G --> H[Build and Tests]
+    H --> I[Security Regression]
+    I --> J[Static Rescan]
+    J --> K{Verification}
+    K -->|Pass| L[VERIFIED]
+    K -->|Fail| M[REJECTED]
+    L --> N[Provenance JSON]
+```
+
+The LLM is used for reasoning and constrained edit intent. Patch construction and final approval remain outside the model boundary.
+
 ## What works today
 
 - Semgrep-based static analysis
