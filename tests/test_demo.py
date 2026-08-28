@@ -36,6 +36,7 @@ def run_result(approved: bool = True) -> CRSRunResult:
             path="C:/repository",
             languages=["Python"],
             file_count=1,
+            repository_hash="abc123",
         ),
         finding=finding,
         reasoning=ReasoningResult(
@@ -71,26 +72,43 @@ def run_result(approved: bool = True) -> CRSRunResult:
 def test_render_result_contains_all_stages_and_decision(
     approved: bool, decision: str
 ) -> None:
-    output = demo.render_result(run_result(approved))
+    output = demo.render_result(run_result(approved), elapsed_seconds=12.34)
 
     for stage in ("[1/4] FIND", "[2/4] REASON", "[3/4] PATCH", "[4/4] VERIFY"):
         assert stage in output
-    assert f"FINAL DECISION: {decision}" in output
-    assert "Original repository modified: NO" in output
-    assert "Reasoning confidence: 0.90 (not proof)" in output
+    assert f"FINAL DECISION : {decision}" in output
+    assert "ORIGINAL REPOSITORY MODIFIED : NO" in output
+    assert "Reasoning confidence : 0.90 (advisory, not proof)" in output
+    assert "AI proposes; deterministic verification decides" in output
+    assert "TOTAL RUN TIME : 12.34s" in output
+    assert "verification is fail-closed" in output
 
 
-def test_main_uses_injected_pipeline_without_network(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_render_result_can_omit_timing() -> None:
+    output = demo.render_result(run_result(True))
+
+    assert "TOTAL RUN TIME" not in output
+
+
+def test_main_uses_injected_pipeline_and_writes_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     pipeline = Mock()
     pipeline.run.return_value = run_result(True)
     monkeypatch.setattr(demo, "pipeline_from_environment", lambda: pipeline)
+    monkeypatch.setenv("AIKAVACH_OLLAMA_MODEL", "local-model")
 
-    exit_code = demo.main(["sample"])
+    artifacts = tmp_path / "artifacts"
+    exit_code = demo.main(["sample", "--artifacts-dir", str(artifacts)])
 
+    output = capsys.readouterr().out
     assert exit_code == 0
-    assert "FINAL DECISION: VERIFIED" in capsys.readouterr().out
+    assert "FINAL DECISION : VERIFIED" in output
+    assert "TOTAL RUN TIME :" in output
+    assert f"PROVENANCE RECORD : {artifacts / 'latest_run.json'}" in output
+    assert (artifacts / "latest_run.json").is_file()
     pipeline.run.assert_called_once_with(str(Path("sample").expanduser()))
 
 
