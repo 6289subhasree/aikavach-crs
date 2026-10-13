@@ -1,17 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { initialRun, relativeFile, runReducer, shortPath } from "./runReducer";
 import { InfoTip, Tour, narrate, useTour } from "./Guide";
+import System, { deriveSystem, type NodeId } from "./System";
 import Terrain from "./Terrain";
 import type { EngineEvent, HistoryEntry, Mode, RunState, StageName, Status } from "./types";
+import type { CheckName } from "./types";
 import { CHECKS, STAGES } from "./types";
 
 const HISTORY_KEY = "vayu.history.v1";
 const PACED = new Set(["stage", "findings", "reasoning", "patch", "check", "verification", "done"]);
-type Drawer = null | "diff" | "proof" | "log";
+type Drawer = null | "diff" | "proof" | "log" | "files" | "findings" | "report";
+type Inspect =
+  | { kind: "node"; id: NodeId }
+  | { kind: "stage"; id: StageName }
+  | { kind: "check"; id: string }
+  | { kind: "tool"; id: "engine" | "semgrep" | "ollama" }
+  | { kind: "target" }
+  | { kind: "gauge"; id: "confidence" | "checks" }
+  | null;
 type PinMode = "all" | "findings" | "none";
 
 const MODE_LABEL: Record<Mode, string> = { auto: "Auto", ollama: "Ollama", offline: "Offline rules" };
@@ -22,6 +32,8 @@ export default function Dashboard() {
   const [customPath, setCustomPath] = useState("");
   const [mode, setMode] = useState<Mode>("auto");
   const [drawer, setDrawer] = useState<Drawer>(null);
+  const [inspect, setInspect] = useState<Inspect>(null);
+  const [mid, setMid] = useState<"map" | "system">("map");
   const [pins, setPins] = useState<PinMode>("all");
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [hasReplay, setHasReplay] = useState(false);
@@ -219,9 +231,9 @@ export default function Dashboard() {
             </Filter>
             <Filter label="Tools" readOnly>
               <span className="filter-value tools">
-                <Dot ok={status?.engine.ok} title="Python engine" />
-                <Dot ok={status?.semgrep.ok} title={status?.semgrep.version ?? "Semgrep not found"} />
-                <Dot ok={status ? status.ollama.ok && status.ollama.modelInstalled : undefined} title={status?.ollama.ok ? "Ollama" : "Ollama offline"} />
+                <Dot ok={status?.engine.ok} title="Python engine — click for details" onClick={() => setInspect({ kind: "tool", id: "engine" })} />
+                <Dot ok={status?.semgrep.ok} title={(status?.semgrep.version ?? "Semgrep not found") + " — click for details"} onClick={() => setInspect({ kind: "tool", id: "semgrep" })} />
+                <Dot ok={status ? status.ollama.ok && status.ollama.modelInstalled : undefined} title={(status?.ollama.ok ? "Ollama" : "Ollama offline") + " — click for details"} onClick={() => setInspect({ kind: "tool", id: "ollama" })} />
               </span>
             </Filter>
           </div>
@@ -260,16 +272,17 @@ export default function Dashboard() {
                   <br />
                   Analysis
                 </h1>
-                <p>
+                <button className="sub-btn" onClick={() => setInspect({ kind: "target" })} data-tip="Target details">
                   {run.repoMap
                     ? `Data based on ${run.repoMap.total_lines.toLocaleString()} lines in ${run.repoMap.files.length} file${run.repoMap.files.length === 1 ? "" : "s"}`
                     : "No target scanned yet"}
-                </p>
+                  <i className="fa-solid fa-circle-info" />
+                </button>
               </div>
             </div>
 
-            <Intensity run={run} hotFile={hotFile} />
-            <Nesting run={run} hotFile={hotFile} />
+            <Intensity run={run} hotFile={hotFile} onOpen={() => setDrawer("files")} />
+            <Nesting run={run} hotFile={hotFile} onOpen={() => setDrawer("files")} />
 
             <div className="left-controls">
               <Filter label="" compact>
@@ -281,8 +294,11 @@ export default function Dashboard() {
               </Filter>
               <Filter label="" compact>
                 <select value="" onChange={(e) => e.target.value && setDrawer(e.target.value as Drawer)} aria-label="Open panel">
-                  <option value="">Last run</option>
+                  <option value="">Panels…</option>
+                  <option value="findings">Findings</option>
+                  <option value="files">Files</option>
                   <option value="diff">Code &amp; diff</option>
+                  <option value="report">Run report</option>
                   <option value="proof">Provenance</option>
                   <option value="log">Engine log</option>
                 </select>
@@ -300,18 +316,32 @@ export default function Dashboard() {
           </aside>
 
           <div className="map" data-tour="map">
-            <Terrain run={run} hotFile={hotFile} hotLine={hotLine} showPins={pins !== "none"} onHotspot={setHotspot} />
-            {pins === "findings" && <style>{`.terrain .pin:not(.pin-main){display:none}`}</style>}
+            <div className="mid-switch" role="tablist" aria-label="Middle view">
+              <button role="tab" aria-selected={mid === "map"} className={mid === "map" ? "on" : ""} onClick={() => setMid("map")} data-tip="Point-cloud map of your code">
+                <i className="fa-solid fa-mountain-sun" /> Code map
+              </button>
+              <button role="tab" aria-selected={mid === "system"} className={mid === "system" ? "on" : ""} onClick={() => setMid("system")} data-tip="How the code's system behaves">
+                <i className="fa-solid fa-diagram-project" /> System
+              </button>
+            </div>
+            {mid === "map" ? (
+              <>
+                <Terrain run={run} hotFile={hotFile} hotLine={hotLine} showPins={pins !== "none"} onHotspot={setHotspot} />
+                {pins === "findings" && <style>{`.terrain .pin:not(.pin-main){display:none}`}</style>}
+              </>
+            ) : (
+              <System run={run} hotFile={hotFile} hotLine={hotLine} onInspect={(n) => setInspect({ kind: "node", id: n })} />
+            )}
 
             <StatusPill run={run} />
-            {run.phase === "idle" && !run.repoMap && (
+            {mid === "map" && run.phase === "idle" && !run.repoMap && (
               <button className="nudge" onClick={start} disabled={!activeTarget}>
                 <i className="fa-solid fa-play" />
                 Press play to scan <b>{activeTarget.replace(/\\/g, "/").split("/").filter(Boolean).pop() || "a target"}</b>
               </button>
             )}
-            <Legend />
-            {hotspot && finding && <Callout run={run} at={hotspot} hotFile={hotFile} hotLine={hotLine} onOpen={setDrawer} />}
+            {mid === "map" && <Legend />}
+            {mid === "map" && hotspot && finding && <Callout run={run} at={hotspot} hotFile={hotFile} hotLine={hotLine} onOpen={setDrawer} />}
 
             <div className="toolbar" data-tour="run">
               <button className="icon-btn" onClick={reset} disabled={running} aria-label="Reset" data-tip="Clear this run">
@@ -363,13 +393,15 @@ export default function Dashboard() {
               tip="How sure the AI is about its explanation of the bug. This is an opinion, not proof — only the checks below decide."
               value={run.reasoning ? Math.round(run.reasoning.confidence * 100) : null}
               max={100}
+              onClick={() => setInspect({ kind: "gauge", id: "confidence" })}
             />
             <Gauge
-              tip="How many of the 4 verification checks the patch has passed. A fix is accepted only at 4 / 4." 
+              tip="How many of the 4 verification checks the patch has passed. A fix is accepted only at 4 / 4."
               label="Checks Passed"
               value={Object.keys(run.checks).length || run.stages.VERIFY.status !== "idle" ? Object.values(run.checks).filter((c) => c?.passed).length : null}
               max={4}
               bad={Object.values(run.checks).some((c) => c && !c.passed)}
+              onClick={() => setInspect({ kind: "gauge", id: "checks" })}
             />
             </div>
 
@@ -377,22 +409,32 @@ export default function Dashboard() {
               <button className="icon-btn sm" onClick={() => searchRef.current?.focus()} aria-label="Scan another path" data-tip="Scan another folder">
                 <i className="fa-solid fa-plus" />
               </button>
-              <button className="chip-btn" onClick={() => setPins(pins === "none" ? "all" : "none")} data-tip="Show or hide pins">
+              <button className="chip-btn" onClick={() => setDrawer("findings")} data-tip="Open findings panel">
                 Findings {run.findings.length}
-                <i className={`fa-solid ${pins === "none" ? "fa-eye" : "fa-xmark"}`} />
+                <i className="fa-solid fa-arrow-up-right-from-square" />
               </button>
             </div>
           </aside>
 
-          {drawer && <DrawerPanel kind={drawer} run={run} history={history} onClose={() => setDrawer(null)} onSwitch={setDrawer} />}
+          {drawer && (
+            <DrawerPanel
+              kind={drawer}
+              run={run}
+              history={history}
+              hotFile={hotFile}
+              onClose={() => setDrawer(null)}
+              onSwitch={setDrawer}
+            />
+          )}
+          {inspect && <InspectModal inspect={inspect} run={run} status={status} hotFile={hotFile} hotLine={hotLine} mode={mode} onClose={() => setInspect(null)} onOpenDrawer={(d) => { setInspect(null); setDrawer(d); }} onShowSystem={() => { setInspect(null); setMid("system"); }} />}
         </section>
 
         <Tour step={tour.step} setStep={tour.setStep} close={tour.close} />
 
         {/* ---------------- lower band ---------------- */}
         <section className="lower">
-          <StageBlocks run={run} hotFile={hotFile} onRun={start} onReset={reset} onExport={downloadProvenance} canRun={!running && !!activeTarget} />
-          <Checks run={run} onHistory={() => setDrawer("proof")} onExport={downloadProvenance} />
+          <StageBlocks run={run} hotFile={hotFile} onRun={start} onReset={reset} onExport={downloadProvenance} canRun={!running && !!activeTarget} onInspect={(stg) => setInspect({ kind: "stage", id: stg })} />
+          <Checks run={run} onHistory={() => setDrawer("proof")} onExport={downloadProvenance} onInspect={(id) => setInspect({ kind: "check", id })} />
         </section>
       </div>
     </div>
@@ -468,8 +510,8 @@ function Filter({ label, children, readOnly, compact }: { label: string; childre
   );
 }
 
-function Dot({ ok, title }: { ok: boolean | undefined; title: string }) {
-  return <i className={`tool ${ok === undefined ? "" : ok ? "ok" : "bad"}`} title={title} />;
+function Dot({ ok, title, onClick }: { ok: boolean | undefined; title: string; onClick: () => void }) {
+  return <button className={`tool ${ok === undefined ? "" : ok ? "ok" : "bad"}`} title={title} onClick={onClick} aria-label={title} />;
 }
 
 function download(name: string, data: unknown) {
@@ -588,7 +630,7 @@ function kind(type: string | undefined) {
 
 /* ---------------- left charts ---------------- */
 
-function Intensity({ run, hotFile }: { run: RunState; hotFile: string | null }) {
+function Intensity({ run, hotFile, onOpen }: { run: RunState; hotFile: string | null; onOpen: () => void }) {
   const map = run.repoMap;
   const single = map?.files.length === 1 ? map.files[0] : null;
   const values = single ? single.lines : map ? map.files.map((f) => f.line_count) : [];
@@ -605,7 +647,7 @@ function Intensity({ run, hotFile }: { run: RunState; hotFile: string | null }) 
   return (
     <div className="chart">
       <h3>
-        {single ? "Code Intensity by Line" : "Code Intensity by File"}
+        <button className="h3-btn" onClick={onOpen}>{single ? "Code Intensity by Line" : "Code Intensity by File"}</button>
         <InfoTip
           text={
             single
@@ -640,7 +682,7 @@ function Intensity({ run, hotFile }: { run: RunState; hotFile: string | null }) 
   );
 }
 
-function Nesting({ run, hotFile }: { run: RunState; hotFile: string | null }) {
+function Nesting({ run, hotFile, onOpen }: { run: RunState; hotFile: string | null; onOpen: () => void }) {
   const map = run.repoMap;
   const items = useMemo(() => {
     if (!map) return [] as { v: number; hot: boolean }[];
@@ -673,7 +715,7 @@ function Nesting({ run, hotFile }: { run: RunState; hotFile: string | null }) {
   return (
     <div className="chart nesting">
       <h3>
-        Nesting Depth
+        <button className="h3-btn" onClick={onOpen}>Nesting Depth</button>
         <InfoTip text="How deeply indented the code gets (spaces of indentation). Deeply nested code is harder to review. Orange marks where the finding sits." />
       </h3>
       <svg viewBox={`0 0 ${W} ${H + 46}`} className="chart-svg" aria-hidden="true">
@@ -711,14 +753,14 @@ function Nesting({ run, hotFile }: { run: RunState; hotFile: string | null }) {
 
 /* ---------------- right gauges ---------------- */
 
-function Gauge({ label, value, max, bad, tip }: { label: string; value: number | null; max: number; bad?: boolean; tip: string }) {
+function Gauge({ label, value, max, bad, tip, onClick }: { label: string; value: number | null; max: number; bad?: boolean; tip: string; onClick: () => void }) {
   const r = 30;
   const c = 2 * Math.PI * r;
   const f = value === null ? 0 : Math.max(0, Math.min(1, value / max));
   const a = ((-90 + f * 360) * Math.PI) / 180;
   const id = label.replace(/\W/g, "");
   return (
-    <div className={`gauge ${bad ? "bad" : ""}`}>
+    <button className={`gauge ${bad ? "bad" : ""}`} onClick={onClick} data-tip="Click for details">
       <svg viewBox="0 0 80 80" aria-hidden="true">
         <defs>
           <linearGradient id={`gg-${id}`} x1="0" y1="0" x2="1" y2="1">
@@ -739,7 +781,7 @@ function Gauge({ label, value, max, bad, tip }: { label: string; value: number |
         {value ?? "—"}
         <small> / {max}</small>
       </span>
-    </div>
+    </button>
   );
 }
 
@@ -752,6 +794,7 @@ function StageBlocks({
   onReset,
   onExport,
   canRun,
+  onInspect,
 }: {
   run: RunState;
   hotFile: string | null;
@@ -759,6 +802,7 @@ function StageBlocks({
   onReset: () => void;
   onExport: () => void;
   canRun: boolean;
+  onInspect: (s: StageName) => void;
 }) {
   const COLS = 36;
   const first = 5;
@@ -782,12 +826,14 @@ function StageBlocks({
       <div className="blocks-body">
         <div className="row-labels">
           {STAGES.map((s) => (
-            <span key={s}>{s.charAt(0) + s.slice(1).toLowerCase()}</span>
+            <button key={s} className="row-label-btn" onClick={() => onInspect(s)} data-tip={`${STAGE_NAME[s]} — details`}>
+              {s.charAt(0) + s.slice(1).toLowerCase()}
+            </button>
           ))}
         </div>
         <div className="dotfield" style={{ "--cols": COLS } as React.CSSProperties}>
           {STAGES.map((s, row) => (
-            <div key={s} className="dotrow">
+            <div key={s} className="dotrow" role="button" tabIndex={0} onClick={() => onInspect(s)} onKeyDown={(e) => e.key === "Enter" && onInspect(s)}>
               {Array.from({ length: COLS }, (_, i) => {
                 const st = run.stages[s];
                 const lit = st.start !== undefined && i >= col(st.start) && i <= col(st.end ?? run.clock);
@@ -855,7 +901,7 @@ function StageBlocks({
   );
 }
 
-function Checks({ run, onHistory, onExport }: { run: RunState; onHistory: () => void; onExport: () => void }) {
+function Checks({ run, onHistory, onExport, onInspect }: { run: RunState; onHistory: () => void; onExport: () => void; onInspect: (id: string) => void }) {
   const verifyStart = run.stages.VERIFY.start ?? 0;
   const timings = CHECKS.map((c, i) => {
     const st = run.checks[c.id];
@@ -884,7 +930,7 @@ function Checks({ run, onHistory, onExport }: { run: RunState; onHistory: () => 
           const st = run.checks[c.id];
           const pending = run.stages.VERIFY.status === "running" && !st;
           return (
-            <div key={c.id} className={`col ${st ? (st.passed ? "pass" : "fail") : pending ? "pending" : ""}`} title={st?.reason}>
+            <button key={c.id} className={`col ${st ? (st.passed ? "pass" : "fail") : pending ? "pending" : ""}`} onClick={() => onInspect(c.id)} data-tip="Click for details">
               <div className="col-head">
                 <i className={`fa-solid ${st ? (st.passed ? "fa-shield-halved ok" : "fa-triangle-exclamation bad") : c.icon}`} />
                 {c.label}
@@ -896,7 +942,7 @@ function Checks({ run, onHistory, onExport }: { run: RunState; onHistory: () => 
                   {timings[i] !== null && <small> / {(timings[i] as number).toFixed(2)}s</small>}
                 </b>
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -906,16 +952,27 @@ function Checks({ run, onHistory, onExport }: { run: RunState; onHistory: () => 
 
 /* ---------------- drawer ---------------- */
 
+const DRAWER_TABS: { id: Exclude<Drawer, null>; label: string }[] = [
+  { id: "findings", label: "Findings" },
+  { id: "files", label: "Files" },
+  { id: "diff", label: "Code & diff" },
+  { id: "report", label: "Report" },
+  { id: "proof", label: "Provenance" },
+  { id: "log", label: "Log" },
+];
+
 function DrawerPanel({
   kind: k,
   run,
   history,
+  hotFile,
   onClose,
   onSwitch,
 }: {
   kind: Exclude<Drawer, null>;
   run: RunState;
   history: HistoryEntry[];
+  hotFile: string | null;
   onClose: () => void;
   onSwitch: (d: Drawer) => void;
 }) {
@@ -925,14 +982,13 @@ function DrawerPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const title = k === "diff" ? "Code & diff" : k === "proof" ? "Provenance" : "Engine log";
   return (
-    <div className="drawer" role="dialog" aria-label={title}>
+    <div className="drawer" role="dialog" aria-label={DRAWER_TABS.find((t) => t.id === k)?.label}>
       <div className="drawer-head">
         <div className="drawer-tabs">
-          {(["diff", "proof", "log"] as const).map((d) => (
-            <button key={d} className={d === k ? "on" : ""} onClick={() => onSwitch(d)}>
-              {d === "diff" ? "Code & diff" : d === "proof" ? "Provenance" : "Log"}
+          {DRAWER_TABS.map((d) => (
+            <button key={d.id} className={d.id === k ? "on" : ""} onClick={() => onSwitch(d.id)}>
+              {d.label}
             </button>
           ))}
         </div>
@@ -941,12 +997,320 @@ function DrawerPanel({
         </button>
       </div>
       <div className="drawer-body">
+        {k === "findings" && <FindingsPanel run={run} onDiff={() => onSwitch("diff")} />}
+        {k === "files" && <FilesPanel run={run} hotFile={hotFile} />}
         {k === "diff" && <DiffPanel run={run} />}
+        {k === "report" && <ReportPanel run={run} />}
         {k === "proof" && <ProofPanel run={run} history={history} />}
         {k === "log" && <LogPanel run={run} />}
       </div>
     </div>
   );
+}
+
+function FindingsPanel({ run, onDiff }: { run: RunState; onDiff: () => void }) {
+  if (!run.findings.length)
+    return (
+      <>
+        <h4>Findings</h4>
+        <p className="none">{run.decision === "CLEAN" ? "No vulnerabilities were found in this target." : "Findings appear here once FIND completes."}</p>
+      </>
+    );
+  return (
+    <>
+      <h4>
+        Findings <span>{run.findings.length} total</span>
+      </h4>
+      {run.findings.map((f, i) => (
+        <div key={f.finding_id} className={`find-card ${i === 0 ? "primary" : ""}`}>
+          <div className="find-top">
+            <span className={`sev sev-${f.severity.toLowerCase()}`}>{f.severity}</span>
+            <b>{kind(f.vulnerability_type)}</b>
+            {i === 0 && <span className="tag-sm">being fixed</span>}
+          </div>
+          <p className="muted small">{f.title}</p>
+          <dl className="kv">
+            <dt>Where</dt>
+            <dd>
+              {shortPath(f.file)}:{f.line_start}
+            </dd>
+            <dt>Rule</dt>
+            <dd>{f.evidence[0]?.raw_reference ?? "—"}</dd>
+            <dt>Scanner confidence</dt>
+            <dd>{Math.round(f.confidence * 100)}%</dd>
+          </dl>
+          {i === 0 && (
+            <button className="link-btn" onClick={onDiff}>
+              <i className="fa-solid fa-code" /> View code &amp; patch
+            </button>
+          )}
+        </div>
+      ))}
+      <p className="muted tiny">Today VAYU remediates the first finding end-to-end; the rest are reported for triage.</p>
+    </>
+  );
+}
+
+function FilesPanel({ run, hotFile }: { run: RunState; hotFile: string | null }) {
+  const map = run.repoMap;
+  if (!map)
+    return (
+      <>
+        <h4>Files</h4>
+        <p className="none">Run a scan to list the files in the target.</p>
+      </>
+    );
+  const max = Math.max(1, ...map.files.map((f) => f.line_count));
+  const sorted = [...map.files].sort((a, b) => b.line_count - a.line_count);
+  return (
+    <>
+      <h4>
+        Files <span>{map.files.length} · {map.total_lines.toLocaleString()} lines</span>
+      </h4>
+      <ul className="file-list">
+        {sorted.map((f) => (
+          <li key={f.path} className={f.path === hotFile ? "hot" : ""}>
+            <span className="file-name">
+              {f.path === hotFile && <i className="fa-solid fa-triangle-exclamation hot" />}
+              {f.path}
+            </span>
+            <span className="file-bar">
+              <i style={{ width: `${(f.line_count / max) * 100}%` }} />
+            </span>
+            <span className="file-num">{f.line_count}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="muted tiny">Bars show each file&rsquo;s size in lines. The highlighted file holds the finding.</p>
+    </>
+  );
+}
+
+function ReportPanel({ run }: { run: RunState }) {
+  const f = run.findings[0];
+  const v = run.verification;
+  const steps = [
+    { on: run.stages.FIND.status === "done", label: "Scanned the code", body: f ? `Found ${kind(f.vulnerability_type)} at ${shortPath(f.file)}:${f.line_start}.` : "No vulnerable patterns found." },
+    { on: !!run.reasoning, label: "Explained the root cause", body: run.reasoning?.root_cause ?? "—" },
+    { on: !!run.patch, label: "Proposed a one-line fix", body: run.patch ? `Changed ${run.patch.target_file}; the model only chose the replacement line.` : "—" },
+    { on: !!v, label: "Verified in a sandbox", body: v ? `${Object.values(run.checks).filter((c) => c.passed).length} of 4 checks passed. ${v.approved ? "Accepted." : "Rejected."}` : "—" },
+  ];
+  return (
+    <>
+      <h4>
+        Run report
+        {run.decision && <span className={run.decision.toLowerCase()}>{run.decision}</span>}
+      </h4>
+      {run.phase === "idle" ? (
+        <p className="none">Run VAYU to generate a report.</p>
+      ) : (
+        <>
+          <ol className="report-steps">
+            {steps.map((st, i) => (
+              <li key={i} className={st.on ? "done" : ""}>
+                <b>{st.label}</b>
+                <p>{st.body}</p>
+              </li>
+            ))}
+          </ol>
+          <dl className="kv">
+            <dt>Reasoning</dt>
+            <dd>{run.provider === "ollama" ? `Ollama / ${run.model}` : run.provider === "offline-rules" || run.provider === "offline" ? "offline rules (no model)" : run.provider ?? "—"}</dd>
+            <dt>Elapsed</dt>
+            <dd>{run.elapsed !== null ? `${run.elapsed}s` : "—"}</dd>
+            <dt>Original repo</dt>
+            <dd>never modified</dd>
+          </dl>
+        </>
+      )}
+    </>
+  );
+}
+
+function InspectModal({
+  inspect,
+  run,
+  status,
+  hotFile,
+  hotLine,
+  mode,
+  onClose,
+  onOpenDrawer,
+  onShowSystem,
+}: {
+  inspect: Inspect;
+  run: RunState;
+  status: Status | null;
+  hotFile: string | null;
+  hotLine: number | null;
+  mode: Mode;
+  onClose: () => void;
+  onOpenDrawer: (d: Drawer) => void;
+  onShowSystem: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  if (!inspect) return null;
+  const d = inspectContent(inspect, run, status, hotFile, hotLine, mode);
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal" role="dialog" aria-label={d.title} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <span className="modal-ic">
+            <i className={`fa-solid ${d.icon} ${d.tone ?? ""}`} />
+          </span>
+          <div>
+            <h3>{d.title}</h3>
+            {d.sub && <p>{d.sub}</p>}
+          </div>
+          <button className="icon-btn sm" onClick={onClose} aria-label="Close">
+            <i className="fa-solid fa-xmark" />
+          </button>
+        </div>
+        <div className="modal-body">
+          {d.body}
+          {d.rows && (
+            <dl className="kv">
+              {d.rows.map(([k, val]) => (
+                <Fragment key={k}>
+                  <dt>{k}</dt>
+                  <dd>{val}</dd>
+                </Fragment>
+              ))}
+            </dl>
+          )}
+        </div>
+        {d.actions && (
+          <div className="modal-foot">
+            {d.actions.map((a) => (
+              <button key={a.label} className="pill-btn" onClick={a.run === "system" ? onShowSystem : () => onOpenDrawer(a.run as Drawer)}>
+                {a.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface Detail {
+  title: string;
+  sub?: string;
+  icon: string;
+  tone?: string;
+  body?: React.ReactNode;
+  rows?: [string, React.ReactNode][];
+  actions?: { label: string; run: string }[];
+}
+
+function inspectContent(inspect: NonNullable<Inspect>, run: RunState, status: Status | null, hotFile: string | null, hotLine: number | null, mode: Mode): Detail {
+  switch (inspect.kind) {
+    case "node":
+      return nodeDetail(inspect.id, run, hotFile, hotLine);
+    case "stage": {
+      const st = run.stages[inspect.id];
+      const copy: Record<StageName, string> = {
+        FIND: "Runs Semgrep over every file and normalises each match into a finding with a severity and a rule id.",
+        REASON: "Shows the flagged code to the reasoner as untrusted data, and gets back a root cause, impact and remediation — never a patch.",
+        PATCH: "Asks the reasoner for one replacement line only. Trusted code builds the real unified diff and validates it.",
+        VERIFY: "Applies the patch in a throwaway copy and runs build, tests, exploit and rescan checks. Fail-closed.",
+      };
+      return {
+        title: STAGE_NAME[inspect.id],
+        sub: st.status === "idle" ? "waiting" : st.status,
+        icon: STAGE_ICON[inspect.id],
+        tone: st.status === "failed" ? "bad" : st.status === "done" ? "ok" : "",
+        body: <p className="modal-text">{copy[inspect.id]}</p>,
+        rows: [
+          ["Status", st.status],
+          ["Started", st.start !== undefined ? `${st.start.toFixed(2)}s` : "—"],
+          ["Finished", st.end !== undefined ? `${st.end.toFixed(2)}s` : "—"],
+          ["Took", st.start !== undefined ? `${((st.end ?? run.clock) - st.start).toFixed(2)}s` : "—"],
+        ],
+        actions: inspect.id === "VERIFY" ? [{ label: "Open report", run: "report" }] : inspect.id === "PATCH" ? [{ label: "View diff", run: "diff" }] : undefined,
+      };
+    }
+    case "check": {
+      const meta = CHECKS.find((c) => c.id === inspect.id)!;
+      const st = run.checks[inspect.id as CheckName];
+      const copy: Record<CheckName, string> = {
+        build: "Compiles the patched file (py_compile for Python). Confirms the fix is syntactically valid.",
+        tests: "Runs the project's existing test suite so the fix doesn't break behaviour.",
+        security_regression: "Parses the patched file and asserts the dangerous pattern (e.g. shell=True) is gone.",
+        static_rescan: "Re-runs Semgrep and confirms the original rule no longer fires on that file.",
+      };
+      return {
+        title: meta.label + " check",
+        sub: st ? (st.passed ? "passed" : "failed") : "not run yet",
+        icon: st ? (st.passed ? "fa-shield-halved" : "fa-triangle-exclamation") : meta.icon,
+        tone: st ? (st.passed ? "ok" : "bad") : "",
+        body: <p className="modal-text">{copy[inspect.id as CheckName]}</p>,
+        rows: [["Result", st ? (st.passed ? "Pass" : "Fail") : "—"], ["Detail", st?.reason ?? "Runs during VERIFY"]],
+      };
+    }
+    case "tool": {
+      const t = inspect.id;
+      if (t === "engine")
+        return { title: "Python engine", sub: status?.engine.ok ? `Python ${status.engine.version}` : "not reachable", icon: "fa-python", tone: status?.engine.ok ? "ok" : "bad", body: <p className="modal-text">The VAYU pipeline (crs.stream) runs here and streams its events to this dashboard.</p> };
+      if (t === "semgrep")
+        return { title: "Semgrep", sub: status?.semgrep.ok ? status.semgrep.version ?? "installed" : "not installed", icon: "fa-magnifying-glass-chart", tone: status?.semgrep.ok ? "ok" : "bad", body: <p className="modal-text">The static-analysis scanner that finds vulnerabilities. {status?.semgrep.ok ? "" : "Install it with: pip install semgrep"}</p> };
+      return { title: "Ollama", sub: status?.ollama.ok ? (status.ollama.modelInstalled ? status.ollama.model : `${status.ollama.model} not pulled`) : "offline", icon: "fa-robot", tone: status?.ollama.ok && status?.ollama.modelInstalled ? "ok" : "bad", body: <p className="modal-text">The local AI model used for reasoning and patch proposals. When it is off, Auto mode falls back to offline rules.</p>, rows: status?.ollama.models.length ? [["Installed models", status.ollama.models.join(", ")]] : undefined };
+    }
+    case "target": {
+      const ti = run.targetInfo;
+      return {
+        title: ti?.name ?? "Target",
+        sub: run.repoMap ? `${run.repoMap.files.length} files · ${run.repoMap.total_lines.toLocaleString()} lines` : "not scanned yet",
+        icon: "fa-folder-open",
+        body: <p className="modal-text">The repository VAYU scanned. Reasoning runs with the {mode} engine.</p>,
+        rows: ti ? [["Path", ti.path], ["Languages", ti.languages.join(", ") || "—"], ["SHA-256", (ti.repository_hash ?? "—").slice(0, 24) + "…"]] : undefined,
+        actions: [{ label: "List files", run: "files" }],
+      };
+    }
+    case "gauge": {
+      if (inspect.id === "confidence")
+        return {
+          title: "Model Confidence",
+          sub: run.reasoning ? `${Math.round(run.reasoning.confidence * 100)}%` : "—",
+          icon: "fa-gauge-high",
+          body: <p className="modal-text">How sure the reasoner is about its explanation. This is an opinion and never decides acceptance — only the four checks do. A fix with 60% confidence that passes all checks is still accepted; a 99% one that fails any check is rejected.</p>,
+        };
+      const passed = Object.values(run.checks).filter((c) => c.passed).length;
+      return {
+        title: "Checks Passed",
+        sub: `${passed} / 4`,
+        icon: "fa-list-check",
+        tone: Object.values(run.checks).some((c) => !c.passed) ? "bad" : "ok",
+        body: <p className="modal-text">The real decision. All four verification checks must pass for a patch to be accepted. This is the proof behind VERIFIED.</p>,
+        rows: CHECKS.map((c) => [c.label, run.checks[c.id] ? (run.checks[c.id]!.passed ? "Pass" : "Fail") : "—"]) as [string, React.ReactNode][],
+        actions: [{ label: "Open report", run: "report" }],
+      };
+    }
+  }
+}
+
+function nodeDetail(id: NodeId, run: RunState, hotFile: string | null, hotLine: number | null): Detail {
+  const m = deriveSystem(run, hotFile, hotLine);
+  const node = m.nodes[id];
+  const extra: Partial<Record<NodeId, { label: string; run: string }[]>> = {
+    sink: [{ label: "View code", run: "diff" }],
+    app: [{ label: "View code", run: "diff" }],
+    vayu: [{ label: "Run report", run: "report" }],
+    sandbox: [{ label: "Verification", run: "report" }],
+  };
+  return {
+    title: node.title,
+    sub: node.sub,
+    icon: node.icon,
+    tone: id === "sink" ? (m.patched ? "ok" : "hot") : id === "vayu" || id === "sandbox" ? "ok" : "",
+    body: <p className="modal-text">{node.detail}</p>,
+    rows: id === "sink" && m.hotText ? [["Flagged line", m.hotText], ["Status", m.patched ? "patched & verified" : "open"]] : undefined,
+    actions: extra[id],
+  };
 }
 
 function DiffPanel({ run }: { run: RunState }) {

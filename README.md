@@ -128,6 +128,8 @@ VAYU ships with a live web dashboard (`vayu-nextjs/`, route `/dashboard`) that r
 - **Codebase terrain**: a point-cloud map generated from the scanned repository. Files are laid out as a treemap and dense code rises into highlands; a finding shows as an orange hot zone that cools once a patch is proposed, with pins for files and the finding, and a callout listing root cause, impact, patch and verification.
 - **Around it**: code-intensity and nesting-depth charts, model-confidence and checks-passed gauges, a pipeline-by-stage dot grid, and per-check verification results with timings.
 - **Panels**: evidence window and unified diff, provenance with downloadable SARIF and a signed SLSA attestation, recent runs, and the engine log.
+- **System view**: a second view of the middle (toggle "Code map" / "System") that simulates the architecture the flagged code runs in — untrusted input → your function → the flagged call → the downstream service (shell, database or filesystem), plus VAYU and its sandbox, drawn as point-cloud spheres with live request flow. The risk path is shown open before the fix and closed once the verified patch lands. Every node is clickable for detail.
+- **Clickable detail everywhere**: charts, map pins, gauges, pipeline stages, verification checks, tool dots and the target line all open a detail panel. New side panels list Findings, Files and a plain-language Run report, alongside Code & diff, Provenance and the engine log.
 - **First-time help**: a guided tour on first visit (replay it with the `?` button or the `?` key), an info tip beside every section, a plain-language line saying which step is running, a map key, file names on hover over the terrain, and labels on every icon button. Press `R` to run.
 
 ```bash
