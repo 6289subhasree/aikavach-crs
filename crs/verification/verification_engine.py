@@ -34,8 +34,17 @@ class VerificationEngine:
         repository_root: str,
         original_finding: VulnerabilityFinding,
         patch: PatchProposal,
+        on_check: Callable[[str, bool, str], None] | None = None,
     ) -> VerificationResult:
-        """Return deterministic approval while leaving the original untouched."""
+        """Return deterministic approval while leaving the original untouched.
+
+        ``on_check`` is told the outcome of each check as it completes. It only
+        observes; approval is still decided solely by the checks below.
+        """
+
+        def report(name: str, passed: bool, reason: str) -> None:
+            if on_check is not None:
+                on_check(name, passed, reason)
 
         validation = self.patch_validator.validate(
             patch, original_finding, repository_root=repository_root
@@ -55,6 +64,7 @@ class VerificationEngine:
                     patched_root, patch.target_file
                 )
                 build_passed = build.passed
+                report("build", build_passed, build.reason)
                 if not build_passed:
                     return self._result(
                         build_passed, False, False, False, build.reason
@@ -62,6 +72,7 @@ class VerificationEngine:
 
                 tests = self.test_runner.run_tests(patched_root)
                 tests_passed = tests.passed
+                report("tests", tests_passed, tests.reason)
                 if not tests_passed:
                     return self._result(True, False, False, False, tests.reason)
 
@@ -69,6 +80,7 @@ class VerificationEngine:
                     patched_root, patch.target_file, original_finding
                 )
                 security_passed = security.passed
+                report("security_regression", security_passed, security.reason)
                 if not security_passed:
                     return self._result(True, True, False, False, security.reason)
 
@@ -76,6 +88,7 @@ class VerificationEngine:
                     patched_root, patch.target_file, original_finding
                 )
                 rescan_clean = rescan.passed
+                report("static_rescan", rescan_clean, rescan.reason)
                 if not rescan_clean:
                     return self._result(True, True, True, False, rescan.reason)
         except Exception as exc:

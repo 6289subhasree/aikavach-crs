@@ -15,6 +15,7 @@ def build_run_provenance(
     result: CRSRunResult,
     *,
     model: str,
+    provider: str = "ollama",
     elapsed_seconds: float | None = None,
     timestamp: datetime | None = None,
     run_id: str | None = None,
@@ -56,7 +57,7 @@ def build_run_provenance(
             "line": finding.line_start,
         },
         "reasoning": {
-            "provider": "ollama",
+            "provider": provider,
             "model": model,
             "confidence": reasoning.confidence,
             "confidence_is_proof": False,
