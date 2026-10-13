@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 
 export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -105,7 +106,7 @@ export default function Home() {
         <header className="header anim" style={{ "--d": "0s" } as React.CSSProperties}>
           <nav className="desktop-nav">
             <a href="#" className="nav-link active">Home</a>
-            <a href="#" className="nav-link">Product</a>
+            <Link href="/dashboard" className="nav-link">Dashboard</Link>
             <a href="#" className="nav-link">Case Studies</a>
             <a href="#" className="nav-link">Contact</a>
           </nav>
@@ -142,7 +143,7 @@ export default function Home() {
             Experience true autonomous cybersecurity. VAYU doesn't just find vulnerabilities—<br />it reasons, patches, and mathematically proves they are eradicated.
           </p>
 
-          <a href="#" className="cta anim" style={{ "--d": "0.4s" } as React.CSSProperties}>Coming Soon</a>
+          <Link href="/dashboard" className="cta anim" style={{ "--d": "0.4s" } as React.CSSProperties}>Open Dashboard</Link>
         </main>
 
         <footer className="stats-footer">
@@ -181,7 +182,7 @@ export default function Home() {
       <div className={`mobile-menu ${menuOpen ? "" : "hidden"}`}>
         <nav className="mobile-nav">
           <a href="#" className="nav-link active anim-mob" onClick={closeMenu}>Home</a>
-          <a href="#" className="nav-link anim-mob" onClick={closeMenu}>Product</a>
+          <Link href="/dashboard" className="nav-link anim-mob" onClick={closeMenu}>Dashboard</Link>
           <a href="#" className="nav-link anim-mob" onClick={closeMenu}>Case Studies</a>
           <a href="#" className="nav-link anim-mob" onClick={closeMenu}>Contact</a>
         </nav>

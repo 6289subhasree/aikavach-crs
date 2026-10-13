@@ -121,6 +121,42 @@ artifacts/latest_run.json
 
 ---
 
+## Dashboard
+
+VAYU ships with a live web dashboard (`vayu-nextjs/`, route `/dashboard`) that runs the real pipeline and visualizes every stage as it happens:
+
+- **System field**: every line of the scanned repository drawn as dot-matrix code; a scan beam during FIND, the vulnerable line igniting with a pin, evidence links during REASON, the line rewriting during PATCH and one ring per verification check.
+- **Gauges and grids**: model confidence (labelled "not proof"), checks passed, pipeline-by-stage timeline, per-check verification tiles.
+- **Detail views**: the finding with its evidence window, AI reasoning, the unified diff, the engine log, and a Proof tab with the provenance record plus downloadable SARIF and a signed SLSA attestation.
+
+```bash
+pip install -r requirements.txt        # includes semgrep
+cd vayu-nextjs && npm install && npm run dev
+# open http://localhost:3000/dashboard
+```
+
+The Next.js API routes (`/api/status`, `/api/run`) spawn `python -m crs.stream <target>` and stream its newline-delimited JSON events to the browser, so there is no separate backend to start. Set `VAYU_PYTHON` to pick an interpreter (a `venv/` or `.venv/` in the repo root is used automatically).
+
+**Engine modes** (top bar):
+
+| Mode | Reasoning | Needs |
+|---|---|---|
+| Auto | Ollama if it is reachable, otherwise offline rules | — |
+| Ollama | Local model (`AIKAVACH_OLLAMA_MODEL`, default `qwen2.5-coder:3b`) | Ollama running locally |
+| Offline rules | Deterministic built-in remediation rules, no model | nothing |
+
+Offline runs are labelled `offline-rules` in the provenance record. Either way, the verification harness alone decides VERIFIED or REJECTED.
+
+**APIs and services used:** no paid or cloud APIs. Everything runs locally: Semgrep CLI, an optional local Ollama server, and Python. The page loads Google Fonts, Font Awesome (cdnjs), the dot-matrix display font and the landing background video from public CDNs.
+
+To record a run for offline replay (shown as a Replay button), save the stream into the app's public folder:
+
+```bash
+python -m crs.stream samples/vulnerable/command_injection > vayu-nextjs/public/replay.ndjson
+```
+
+---
+
 ## Verification Logic
 
 The final decision is based on the verification harness, not the model's confidence. The current checks are strictly enforced:
@@ -136,4 +172,4 @@ If verification cannot establish that the candidate patch is completely safe, th
 
 ## Project Status
 
-The core MVP is working end-to-end, and the test suite currently contains 122 passing tests. We are rapidly iterating towards the 1-month production-grade vision. Join us in building the future of autonomous cybersecurity.
+The core MVP is working end-to-end, and the test suite currently contains 140 passing tests. We are rapidly iterating towards the 1-month production-grade vision. Join us in building the future of autonomous cybersecurity.
