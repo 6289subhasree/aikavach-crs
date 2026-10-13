@@ -128,6 +128,7 @@ VAYU ships with a live web dashboard (`vayu-nextjs/`, route `/dashboard`) that r
 - **Codebase terrain**: a point-cloud map generated from the scanned repository. Files are laid out as a treemap and dense code rises into highlands; a finding shows as an orange hot zone that cools once a patch is proposed, with pins for files and the finding, and a callout listing root cause, impact, patch and verification.
 - **Around it**: code-intensity and nesting-depth charts, model-confidence and checks-passed gauges, a pipeline-by-stage dot grid, and per-check verification results with timings.
 - **Panels**: evidence window and unified diff, provenance with downloadable SARIF and a signed SLSA attestation, recent runs, and the engine log.
+- **First-time help**: a guided tour on first visit (replay it with the `?` button or the `?` key), an info tip beside every section, a plain-language line saying which step is running, a map key, file names on hover over the terrain, and labels on every icon button. Press `R` to run.
 
 ```bash
 pip install -r requirements.txt        # includes semgrep

@@ -1028,6 +1028,379 @@
 .log .error { color: var(--bad); }
 .log .dim { color: var(--muted); font-size: inherit; }
 
+/* ---------------- first-time clarity ---------------- */
+
+/* Hover labels for icon buttons (data-tip). */
+.dash [data-tip] {
+  position: relative;
+}
+.dash [data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translate(-50%, 4px);
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #1d1a23;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 30;
+}
+.dash [data-tip]:hover::after,
+.dash [data-tip]:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.dash .top [data-tip]::after,
+.dash .band-head [data-tip]::after {
+  bottom: auto;
+  top: calc(100% + 8px);
+}
+.dash .top-right [data-tip]::after,
+.dash .band-actions [data-tip]::after {
+  left: auto;
+  right: 0;
+  transform: translate(0, 4px);
+}
+.dash .top-right [data-tip]:hover::after,
+.dash .band-actions [data-tip]:hover::after {
+  transform: none;
+}
+
+/* "i" info tips beside headings. */
+.chart h3,
+.band-head h3,
+.gauge-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.info {
+  position: relative;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--muted);
+  font-size: 7.5px;
+  cursor: help;
+  transition: color 0.15s, border-color 0.15s;
+}
+.info:hover,
+.info:focus-visible {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.info-pop {
+  position: absolute;
+  top: calc(100% + 9px);
+  left: -10px;
+  width: 240px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #1d1a23;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 40;
+}
+.info-left .info-pop {
+  left: auto;
+  right: -10px;
+}
+.info:hover .info-pop,
+.info:focus-visible .info-pop {
+  opacity: 1;
+  transform: none;
+}
+
+/* Status + plain-language narration. */
+.status-wrap {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  width: min(460px, 78%);
+  pointer-events: none;
+}
+.status-wrap .status {
+  position: static;
+  transform: none;
+  max-width: none;
+}
+.narration {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+  text-align: center;
+  text-wrap: balance;
+}
+.narration b {
+  font-weight: 500;
+  color: var(--text);
+}
+.narration.bad b {
+  color: var(--bad);
+}
+
+/* First-run nudge. */
+.nudge {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 18px 0 6px;
+  border-radius: 999px;
+  background: rgba(22, 20, 27, 0.88) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  font-size: 12px !important;
+  color: var(--muted) !important;
+  backdrop-filter: blur(6px);
+  animation: pin-in 0.5s 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.nudge > i {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff;
+  color: #111;
+  font-size: 10px;
+}
+.nudge b {
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* Map key. */
+.legend {
+  position: absolute;
+  left: 0;
+  bottom: 2px;
+  z-index: 3;
+  max-width: 280px;
+}
+.legend > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--control) !important;
+  border: 1px solid var(--control-line) !important;
+  font-size: 11px !important;
+  color: var(--muted) !important;
+}
+.legend > button .dim {
+  margin-left: 2px;
+}
+.legend ul {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: 270px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(22, 20, 27, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  animation: row-in 0.25s both;
+}
+.legend li {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.legend li > i {
+  justify-self: center;
+  font-size: 10px;
+}
+.sw {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.sw-code {
+  background: radial-gradient(circle, #fff3f8 0 1.5px, #c0a0fa 1.6px 3px, #6a44b8 3.1px 6px);
+}
+.sw-hot {
+  background: radial-gradient(circle, #6e3620 0 2px, #e9773f 2.1px 4px, #f0b08c 4.1px 6px);
+}
+.sw-cool {
+  background: radial-gradient(circle, #fff 0 1.5px, #e6b8d8 1.6px 3.5px, #b9a1ea 3.6px 6px);
+}
+.ring-sw {
+  width: 14px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid rgba(226, 214, 252, 0.6);
+}
+
+/* Terrain hover. */
+.hover-tip {
+  position: absolute;
+  z-index: 5;
+  transform: translate(14px, 14px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(22, 20, 27, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.hover-tip b {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+.hover-tip span {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.gauge-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 34px;
+}
+
+/* Guided tour. */
+.tour {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}
+.tour-hole {
+  position: fixed;
+  border-radius: 16px;
+  box-shadow: 0 0 0 9999px rgba(6, 5, 9, 0.72);
+  border: 1px solid rgba(201, 184, 242, 0.5);
+  transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+}
+.tour-card {
+  position: fixed;
+  padding: 16px 18px 14px;
+  border-radius: 14px;
+  background: #18151d;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  transition: top 0.35s cubic-bezier(0.22, 1, 0.36, 1), left 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.tour-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.tour-count {
+  font-size: 10.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.tour-skip {
+  font-size: 11px !important;
+  color: var(--muted) !important;
+}
+.tour-skip:hover {
+  color: var(--text) !important;
+}
+.tour-card h4 {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.tour-card p {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.tour-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 14px;
+}
+.tour-dots {
+  display: flex;
+  gap: 4px;
+}
+.tour-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+}
+.tour-dots i.seen {
+  background: rgba(201, 184, 242, 0.5);
+}
+.tour-dots i.on {
+  width: 14px;
+  border-radius: 3px;
+  background: var(--lav);
+}
+.tour-btns {
+  display: flex;
+  gap: 6px;
+}
+.pill-btn {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--control) !important;
+  border: 1px solid var(--control-line) !important;
+  font-size: 12px !important;
+}
+.pill-btn.on {
+  background: #fff !important;
+  color: #111 !important;
+}
+
 /* ---------------- responsive ---------------- */
 
 @media (max-width: 1200px) {
@@ -1055,6 +1428,8 @@
 
 @media (max-width: 640px) {
   .top-right .search { display: none; }
+  .legend { display: none; }
+  .status-wrap { width: 90%; }
   .stage { display: flex; flex-direction: column; gap: 20px; }
   .left { display: contents; }
   .heading { order: -2; }

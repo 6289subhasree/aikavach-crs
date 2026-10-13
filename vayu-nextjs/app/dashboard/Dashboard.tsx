@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { initialRun, relativeFile, runReducer, shortPath } from "./runReducer";
+import { InfoTip, Tour, narrate, useTour } from "./Guide";
 import Terrain from "./Terrain";
 import type { EngineEvent, HistoryEntry, Mode, RunState, StageName, Status } from "./types";
 import { CHECKS, STAGES } from "./types";
@@ -28,6 +29,7 @@ export default function Dashboard() {
   const [run, dispatch] = useReducer(runReducer, initialRun());
   const abortRef = useRef<AbortController | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const tour = useTour();
 
   const loadStatus = useCallback(async () => {
     try {
@@ -163,6 +165,19 @@ export default function Dashboard() {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // Keyboard shortcuts: R runs, ? opens the tour.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA")) return;
+      if (tour.step !== null || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "?") tour.open();
+      if ((e.key === "r" || e.key === "R") && !running) start();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tour, running, start]);
+
   const finding = run.findings[0] ?? null;
   const hotFile = relativeFile(finding?.file, run.targetInfo?.path);
   const hotLine = finding?.line_start ?? null;
@@ -175,7 +190,7 @@ export default function Dashboard() {
     <div className="dash">
       <div className="shell">
         {/* ---------------- top bar ---------------- */}
-        <header className="top">
+        <header className="top" data-tour="controls">
           <Link href="/" className="logo">
             vayu<span>&gt;</span>
           </Link>
@@ -223,7 +238,10 @@ export default function Dashboard() {
               />
               <i className="fa-solid fa-magnifying-glass" />
             </label>
-            <button className="icon-btn" onClick={loadStatus} aria-label="Recheck tools" title="Recheck tools">
+            <button className="icon-btn" onClick={tour.open} aria-label="How VAYU works" data-tip="How it works (?)">
+              <i className="fa-solid fa-question" />
+            </button>
+            <button className="icon-btn" onClick={loadStatus} aria-label="Recheck tools" data-tip="Recheck tools">
               <i className="fa-solid fa-gear" />
             </button>
           </div>
@@ -269,56 +287,63 @@ export default function Dashboard() {
                   <option value="log">Engine log</option>
                 </select>
               </Filter>
-              <button className="icon-btn sm" onClick={reset} disabled={running} aria-label="Reset" title="Reset">
+              <button className="icon-btn sm" onClick={reset} disabled={running} aria-label="Reset" data-tip="Clear this run">
                 <i className="fa-solid fa-rotate-right" />
               </button>
-              <button className="icon-btn sm" onClick={() => setDrawer("log")} aria-label="Engine log" title="Engine log">
+              <button className="icon-btn sm" onClick={() => setDrawer("log")} aria-label="Engine log" data-tip="Engine log">
                 <i className="fa-solid fa-ellipsis" />
               </button>
-              <button className="icon-btn sm" onClick={downloadProvenance} disabled={!run.artifacts} aria-label="Export provenance" title="Export provenance">
+              <button className="icon-btn sm" onClick={downloadProvenance} disabled={!run.artifacts} aria-label="Export provenance" data-tip="Download audit record">
                 <i className="fa-solid fa-arrow-up-from-bracket" />
               </button>
             </div>
           </aside>
 
-          <div className="map">
+          <div className="map" data-tour="map">
             <Terrain run={run} hotFile={hotFile} hotLine={hotLine} showPins={pins !== "none"} onHotspot={setHotspot} />
             {pins === "findings" && <style>{`.terrain .pin:not(.pin-main){display:none}`}</style>}
 
             <StatusPill run={run} />
+            {run.phase === "idle" && !run.repoMap && (
+              <button className="nudge" onClick={start} disabled={!activeTarget}>
+                <i className="fa-solid fa-play" />
+                Press play to scan <b>{activeTarget.replace(/\\/g, "/").split("/").filter(Boolean).pop() || "a target"}</b>
+              </button>
+            )}
+            <Legend />
             {hotspot && finding && <Callout run={run} at={hotspot} hotFile={hotFile} hotLine={hotLine} onOpen={setDrawer} />}
 
-            <div className="toolbar">
-              <button className="icon-btn" onClick={reset} disabled={running} aria-label="Reset" title="Reset">
+            <div className="toolbar" data-tour="run">
+              <button className="icon-btn" onClick={reset} disabled={running} aria-label="Reset" data-tip="Clear this run">
                 <i className="fa-solid fa-rotate-left" />
               </button>
               {running ? (
-                <button className="icon-btn on" onClick={stop} aria-label="Stop" title="Stop">
+                <button className="icon-btn on" onClick={stop} aria-label="Stop" data-tip="Stop">
                   <i className="fa-solid fa-stop" />
                 </button>
               ) : (
-                <button className="icon-btn on" onClick={start} disabled={!activeTarget || status?.engine.ok === false} aria-label="Run VAYU" title="Run">
+                <button className="icon-btn on" onClick={start} disabled={!activeTarget || status?.engine.ok === false} aria-label="Run VAYU" data-tip="Run VAYU (R)">
                   <i className="fa-solid fa-play" />
                 </button>
               )}
               {STAGES.map((s) => (
-                <span key={s} className={`stage-dot ${run.stages[s].status}`} title={`${s} · ${run.stages[s].status}`}>
+                <span key={s} className={`stage-dot ${run.stages[s].status}`} data-tip={`${STAGE_NAME[s]} · ${run.stages[s].status === "idle" ? "waiting" : run.stages[s].status}`}>
                   <i className={`fa-solid ${STAGE_ICON[s]}`} />
                 </span>
               ))}
               {hasReplay && (
-                <button className="icon-btn" onClick={replay} disabled={running} aria-label="Replay recorded run" title="Replay recorded run">
+                <button className="icon-btn" onClick={replay} disabled={running} aria-label="Replay recorded run" data-tip="Replay recorded run">
                   <i className="fa-solid fa-clock-rotate-left" />
                 </button>
               )}
-              <span className="toolbar-mode">
+              <span className="toolbar-mode" data-tip="Reasoning engine for this run">
                 {run.provider ? (run.provider === "ollama" ? "ollama" : "offline") : MODE_LABEL[mode].toLowerCase()}
               </span>
             </div>
           </div>
 
           <aside className="right">
-            <div className="tabs" role="tablist">
+            <div className="tabs" role="tablist" data-tour="tabs">
               {(
                 [
                   [null, "View"],
@@ -332,19 +357,27 @@ export default function Dashboard() {
               ))}
             </div>
 
-            <Gauge label="Model Confidence" value={run.reasoning ? Math.round(run.reasoning.confidence * 100) : null} max={100} />
+            <div className="gauge-stack" data-tour="gauges">
             <Gauge
+              label="Model Confidence"
+              tip="How sure the AI is about its explanation of the bug. This is an opinion, not proof — only the checks below decide."
+              value={run.reasoning ? Math.round(run.reasoning.confidence * 100) : null}
+              max={100}
+            />
+            <Gauge
+              tip="How many of the 4 verification checks the patch has passed. A fix is accepted only at 4 / 4." 
               label="Checks Passed"
               value={Object.keys(run.checks).length || run.stages.VERIFY.status !== "idle" ? Object.values(run.checks).filter((c) => c?.passed).length : null}
               max={4}
               bad={Object.values(run.checks).some((c) => c && !c.passed)}
             />
+            </div>
 
             <div className="right-foot">
-              <button className="icon-btn sm" onClick={() => searchRef.current?.focus()} aria-label="Scan another path" title="Scan another path">
+              <button className="icon-btn sm" onClick={() => searchRef.current?.focus()} aria-label="Scan another path" data-tip="Scan another folder">
                 <i className="fa-solid fa-plus" />
               </button>
-              <button className="chip-btn" onClick={() => setPins(pins === "none" ? "all" : "none")} title="Toggle pins">
+              <button className="chip-btn" onClick={() => setPins(pins === "none" ? "all" : "none")} data-tip="Show or hide pins">
                 Findings {run.findings.length}
                 <i className={`fa-solid ${pins === "none" ? "fa-eye" : "fa-xmark"}`} />
               </button>
@@ -354,12 +387,62 @@ export default function Dashboard() {
           {drawer && <DrawerPanel kind={drawer} run={run} history={history} onClose={() => setDrawer(null)} onSwitch={setDrawer} />}
         </section>
 
+        <Tour step={tour.step} setStep={tour.setStep} close={tour.close} />
+
         {/* ---------------- lower band ---------------- */}
         <section className="lower">
           <StageBlocks run={run} hotFile={hotFile} onRun={start} onReset={reset} onExport={downloadProvenance} canRun={!running && !!activeTarget} />
           <Checks run={run} onHistory={() => setDrawer("proof")} onExport={downloadProvenance} />
         </section>
       </div>
+    </div>
+  );
+}
+
+const STAGE_NAME: Record<StageName, string> = {
+  FIND: "1 Find — scan for vulnerabilities",
+  REASON: "2 Reason — explain the root cause",
+  PATCH: "3 Patch — propose a fix",
+  VERIFY: "4 Verify — prove the fix works",
+};
+
+function Legend() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`legend ${open ? "open" : ""}`} data-tour="legend">
+      <button onClick={() => setOpen(!open)} aria-expanded={open}>
+        <i className="fa-solid fa-layer-group" />
+        Map key
+        <i className={`fa-solid ${open ? "fa-chevron-down" : "fa-chevron-up"} dim`} />
+      </button>
+      {open && (
+        <ul>
+          <li>
+            <i className="sw sw-code" />
+            Dots are your code; brighter, raised areas have more of it
+          </li>
+          <li>
+            <i className="sw sw-hot" />
+            Orange: a vulnerability was found here
+          </li>
+          <li>
+            <i className="sw sw-cool" />
+            Lavender glow: a fix was proposed
+          </li>
+          <li>
+            <i className="fa-solid fa-shield-halved ok" />
+            File scanned, no findings
+          </li>
+          <li>
+            <i className="fa-solid fa-triangle-exclamation hot" />
+            The flagged line — open the callout for details
+          </li>
+          <li>
+            <i className="ring-sw" />
+            One ring per verification check passed
+          </li>
+        </ul>
+      )}
     </div>
   );
 }
@@ -412,13 +495,21 @@ function StatusPill({ run }: { run: RunState }) {
     text = `${cap(run.error?.stage ?? "run")} failed`;
     tone = "bad";
   }
+  const story = narrate(run);
   return (
-    <div className={`status ${tone}`}>
-      <i className={run.phase === "running" ? "live" : ""} />
-      {text}
-      {run.elapsed !== null && <span>{run.elapsed}s</span>}
-      {run.replay && <span>replay</span>}
-      {run.phase === "error" && run.error && <em title={run.error.message}>{run.error.message}</em>}
+    <div className="status-wrap" data-tour="status">
+      <div className={`status ${tone}`}>
+        <i className={run.phase === "running" ? "live" : ""} />
+        {text}
+        {run.elapsed !== null && <span>{run.elapsed}s</span>}
+        {run.replay && <span>replay</span>}
+      </div>
+      {story.text && (
+        <p className={`narration ${tone}`} aria-live="polite">
+          {story.step && <b>{story.step} · </b>}
+          {story.text}
+        </p>
+      )}
     </div>
   );
 }
@@ -466,10 +557,10 @@ function Callout({
           </span>
           <i className="fa-solid fa-chevron-up dim" />
         </span>
-        <button className="icon-btn sm" onClick={() => onOpen("diff")} aria-label="Open code and diff" title="Code & diff">
+        <button className="icon-btn sm" onClick={() => onOpen("diff")} aria-label="Open code and diff" data-tip="Code & diff">
           <i className="fa-solid fa-sliders" />
         </button>
-        <button className="icon-btn sm" onClick={() => onOpen("log")} aria-label="Open engine log" title="Engine log">
+        <button className="icon-btn sm" onClick={() => onOpen("log")} aria-label="Open engine log" data-tip="Engine log">
           <i className="fa-solid fa-magnifying-glass" />
         </button>
       </div>
@@ -513,7 +604,16 @@ function Intensity({ run, hotFile }: { run: RunState; hotFile: string | null }) 
 
   return (
     <div className="chart">
-      <h3>{single ? "Code Intensity by Line" : "Code Intensity by File"}</h3>
+      <h3>
+        {single ? "Code Intensity by Line" : "Code Intensity by File"}
+        <InfoTip
+          text={
+            single
+              ? "Each bar is one line of the file; taller means a longer line. The orange bar is the line VAYU flagged."
+              : "Each bar is one file; taller means more lines of code. The orange bar is the file with the finding."
+          }
+        />
+      </h3>
       <svg viewBox={`0 0 ${W} ${H + 28}`} className="chart-svg" aria-hidden="true">
         <line x1="0" x2={W} y1={H} y2={H} className="base" />
         {shown.length
@@ -572,7 +672,10 @@ function Nesting({ run, hotFile }: { run: RunState; hotFile: string | null }) {
 
   return (
     <div className="chart nesting">
-      <h3>Nesting Depth</h3>
+      <h3>
+        Nesting Depth
+        <InfoTip text="How deeply indented the code gets (spaces of indentation). Deeply nested code is harder to review. Orange marks where the finding sits." />
+      </h3>
       <svg viewBox={`0 0 ${W} ${H + 46}`} className="chart-svg" aria-hidden="true">
         {markIdx >= 0 && (
           <>
@@ -608,7 +711,7 @@ function Nesting({ run, hotFile }: { run: RunState; hotFile: string | null }) {
 
 /* ---------------- right gauges ---------------- */
 
-function Gauge({ label, value, max, bad }: { label: string; value: number | null; max: number; bad?: boolean }) {
+function Gauge({ label, value, max, bad, tip }: { label: string; value: number | null; max: number; bad?: boolean; tip: string }) {
   const r = 30;
   const c = 2 * Math.PI * r;
   const f = value === null ? 0 : Math.max(0, Math.min(1, value / max));
@@ -628,7 +731,10 @@ function Gauge({ label, value, max, bad }: { label: string; value: number | null
         <line x1="40" y1="40" x2={40 + Math.cos(a) * (r + 6)} y2={40 + Math.sin(a) * (r + 6)} className="needle" />
         <circle cx="40" cy="40" r="1.6" className="hub" />
       </svg>
-      <span className="gauge-label">{label}</span>
+      <span className="gauge-label">
+        {label}
+        <InfoTip text={tip} side="left" />
+      </span>
       <span className="gauge-value">
         {value ?? "—"}
         <small> / {max}</small>
@@ -663,10 +769,13 @@ function StageBlocks({
   const finding = run.findings[0];
 
   return (
-    <div className="blocks">
+    <div className="blocks" data-tour="pipeline">
       <div className="band-head">
-        <h3>Pipeline by Stage</h3>
-        <button className="icon-btn sm" onClick={onRun} disabled={!canRun} aria-label="Run" title="Run">
+        <h3>
+          Pipeline by Stage
+          <InfoTip text="A timeline of the run. Each row is one step; dots fill in while it runs and the pin marks where it finished. A warning pin on Find means something was found." />
+        </h3>
+        <button className="icon-btn sm" onClick={onRun} disabled={!canRun} aria-label="Run" data-tip="Run (R)">
           <i className="fa-solid fa-arrow-up" />
         </button>
       </div>
@@ -711,13 +820,13 @@ function StageBlocks({
           )}
           <div className="cluster">
             <div className="cluster-btns">
-              <button className="icon-btn sm" onClick={onReset} aria-label="Reset" title="Reset">
+              <button className="icon-btn sm" onClick={onReset} aria-label="Reset" data-tip="Clear this run">
                 <i className="fa-solid fa-rotate-right" />
               </button>
-              <button className="icon-btn on" onClick={onRun} disabled={!canRun} aria-label="Run" title="Run">
+              <button className="icon-btn on" onClick={onRun} disabled={!canRun} aria-label="Run" data-tip="Run (R)">
                 <i className="fa-solid fa-play" />
               </button>
-              <button className="icon-btn sm" onClick={onExport} disabled={!run.artifacts} aria-label="Export" title="Export provenance">
+              <button className="icon-btn sm" onClick={onExport} disabled={!run.artifacts} aria-label="Export" data-tip="Download audit record">
                 <i className="fa-solid fa-arrow-up-from-bracket" />
               </button>
             </div>
@@ -755,14 +864,17 @@ function Checks({ run, onHistory, onExport }: { run: RunState; onHistory: () => 
     return Math.max(0, st.at - (before ?? verifyStart));
   });
   return (
-    <div className="checks">
+    <div className="checks" data-tour="checks">
       <div className="band-head">
-        <h3>Verification by Check</h3>
+        <h3>
+          Verification by Check
+          <InfoTip text="The proof. The patch is applied to a temporary copy of your repo and must pass all four checks. If any fails, the fix is rejected. Your real files are never touched." />
+        </h3>
         <div className="band-actions">
-          <button className="icon-btn sm" onClick={onHistory} aria-label="Run history" title="Run history">
+          <button className="icon-btn sm" onClick={onHistory} aria-label="Run history" data-tip="Recent runs">
             <i className="fa-regular fa-calendar" />
           </button>
-          <button className="icon-btn sm" onClick={onExport} disabled={!run.artifacts} aria-label="Export" title="Export provenance">
+          <button className="icon-btn sm" onClick={onExport} disabled={!run.artifacts} aria-label="Export" data-tip="Download audit record">
             <i className="fa-solid fa-arrow-up" />
           </button>
         </div>

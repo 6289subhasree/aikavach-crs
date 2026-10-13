@@ -307,6 +307,7 @@ export default function Terrain({ run, hotFile, hotLine, showPins, onHotspot }: 
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  const [hover, setHover] = useState<{ x: number; y: number; path: string; lines: number } | null>(null);
   const runRef = useRef(run);
   const patchedAt = useRef<number | null>(null);
 
@@ -425,9 +426,35 @@ export default function Terrain({ run, hotFile, hotLine, showPins, onHotspot }: 
   const failed = run.decision === "REJECTED" || (run.phase === "error" && run.findings.length > 0);
   const filePins = showPins && built && run.repoMap ? built.files.filter((f) => f.path !== hotFile && f.w * f.h > 120).slice(0, 5) : [];
 
+  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!built || !run.repoMap) return setHover(null);
+    const box = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - box.left;
+    const py = e.clientY - box.top;
+    const cx = px / PITCH;
+    const cy = py / PITCH;
+    const f = built.files.find((r) => cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h);
+    setHover(f ? { x: px, y: py, path: f.path, lines: f.lines } : null);
+  };
+
   return (
-    <div className="terrain" ref={wrapRef}>
+    <div className="terrain" ref={wrapRef} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
       <canvas ref={canvasRef} role="img" aria-label="Point-cloud map of the scanned codebase" />
+      {hover && (
+        <div className="hover-tip" style={{ left: hover.x, top: hover.y }}>
+          <b>{hover.path}</b>
+          <span>
+            {hover.lines} lines ·{" "}
+            {hover.path === hotFile
+              ? run.decision === "VERIFIED"
+                ? "finding fixed"
+                : "finding here"
+              : run.stages.FIND.status === "done"
+                ? "no findings"
+                : "scanning"}
+          </span>
+        </div>
+      )}
       {filePins.map((f) => (
         <span key={f.path} className="pin" style={{ left: f.cx, top: f.cy }} title={`${f.path} · ${f.lines} lines · no findings`}>
           <i className="fa-solid fa-shield-halved ok" />
