@@ -4,46 +4,39 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { initialRun, relativeFile, runReducer, shortPath } from "./runReducer";
-import SystemField from "./SystemField";
+import Terrain from "./Terrain";
 import type { EngineEvent, HistoryEntry, Mode, RunState, StageName, Status } from "./types";
 import { CHECKS, STAGES } from "./types";
 
 const HISTORY_KEY = "vayu.history.v1";
 const PACED = new Set(["stage", "findings", "reasoning", "patch", "check", "verification", "done"]);
-type Tab = "live" | "patch" | "proof";
+type Drawer = null | "diff" | "proof" | "log";
+type PinMode = "all" | "findings" | "none";
 
-const MODE_LABEL: Record<Mode, string> = {
-  auto: "Auto",
-  ollama: "Ollama",
-  offline: "Offline rules",
-};
-
-/* ------------------------------------------------------------------ */
-/* Root                                                                 */
-/* ------------------------------------------------------------------ */
+const MODE_LABEL: Record<Mode, string> = { auto: "Auto", ollama: "Ollama", offline: "Offline rules" };
 
 export default function Dashboard() {
   const [status, setStatus] = useState<Status | null>(null);
-  const [statusError, setStatusError] = useState(false);
   const [target, setTarget] = useState("");
   const [customPath, setCustomPath] = useState("");
   const [mode, setMode] = useState<Mode>("auto");
-  const [tab, setTab] = useState<Tab>("live");
+  const [drawer, setDrawer] = useState<Drawer>(null);
+  const [pins, setPins] = useState<PinMode>("all");
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [hasReplay, setHasReplay] = useState(false);
+  const [hotspot, setHotspot] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [run, dispatch] = useReducer(runReducer, initialRun());
   const abortRef = useRef<AbortController | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const loadStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/status", { cache: "no-store" });
-      const body = (await res.json()) as Status;
+      const body = (await fetch("/api/status", { cache: "no-store" }).then((r) => r.json())) as Status;
       setStatus(body);
       setHasReplay(!!body.replay);
-      setStatusError(false);
       setTarget((current) => current || body.targets[0]?.path || "");
     } catch {
-      setStatusError(true);
+      setStatus(null);
     }
   }, []);
 
@@ -57,8 +50,7 @@ export default function Dashboard() {
       } catch {
         /* storage unavailable */
       }
-      if (cancelled) return;
-      setHistory(saved);
+      if (!cancelled) setHistory(saved);
     };
     void init();
     return () => {
@@ -66,12 +58,11 @@ export default function Dashboard() {
     };
   }, [loadStatus]);
 
-  // Record finished runs in local history.
   const recorded = useRef<string | null>(null);
   useEffect(() => {
-    if (run.phase !== "done" && run.phase !== "error") return;
-    const id = String(run.artifacts?.provenance?.run_id ?? `${run.target}-${run.clock}-${run.log.length}`);
-    if (recorded.current === id || run.replay) return;
+    if ((run.phase !== "done" && run.phase !== "error") || run.replay) return;
+    const id = String(run.artifacts?.provenance?.run_id ?? `${run.target}-${run.clock}`);
+    if (recorded.current === id) return;
     recorded.current = id;
     const entry: HistoryEntry = {
       id,
@@ -90,9 +81,10 @@ export default function Dashboard() {
       }
       return next;
     });
-  }, [run.phase, run.artifacts, run.target, run.clock, run.log.length, run.decision, run.provider, run.elapsed, run.targetInfo, run.replay]);
+  }, [run.phase, run.replay, run.artifacts, run.target, run.clock, run.targetInfo, run.decision, run.provider, run.elapsed]);
 
   const activeTarget = customPath.trim() || target;
+  const running = run.phase === "running";
 
   const start = useCallback(async () => {
     if (!activeTarget) return;
@@ -126,18 +118,18 @@ export default function Dashboard() {
           const raw = buffer.slice(0, idx).trim();
           buffer = buffer.slice(idx + 1);
           if (!raw) continue;
+          let event: EngineEvent;
           try {
-            const event = JSON.parse(raw) as EngineEvent;
-            // Pace on-screen updates so fast runs stay readable; timings shown are the engine's own.
-            const gap = PACED.has(event.type) ? 420 : 40;
-            const wait = lastShown + gap - performance.now();
-            if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-            if (controller.signal.aborted) return;
-            lastShown = performance.now();
-            dispatch({ kind: "event", event });
+            event = JSON.parse(raw) as EngineEvent;
           } catch {
-            dispatch({ kind: "event", event: { type: "log", t: 0, data: { message: raw } } });
+            event = { type: "log", t: 0, data: { message: raw } };
           }
+          // Pace on-screen updates so fast runs stay readable; timings shown are the engine's own.
+          const wait = lastShown + (PACED.has(event.type) ? 420 : 40) - performance.now();
+          if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+          if (controller.signal.aborted) return;
+          lastShown = performance.now();
+          dispatch({ kind: "event", event });
         }
       }
     } catch (err) {
@@ -150,17 +142,10 @@ export default function Dashboard() {
     const controller = new AbortController();
     abortRef.current = controller;
     const text = await fetch("/replay.ndjson").then((r) => r.text());
-    const events = text
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as EngineEvent);
+    const events = text.split("\n").filter(Boolean).map((l) => JSON.parse(l) as EngineEvent);
     dispatch({ kind: "start", target: "recorded run", replay: true });
-    let last = 0;
     for (const event of events) {
-      if (controller.signal.aborted) return;
-      const wait = Math.min(1400, Math.max(140, (event.t - last) * 1000));
-      last = event.t;
-      await new Promise((r) => setTimeout(r, wait));
+      await new Promise((r) => setTimeout(r, PACED.has(event.type) ? 420 : 40));
       if (controller.signal.aborted) return;
       dispatch({ kind: "event", event });
     }
@@ -168,7 +153,7 @@ export default function Dashboard() {
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
-    dispatch({ kind: "fail", message: "Run stopped from the dashboard" });
+    dispatch({ kind: "fail", message: "Run stopped" });
   }, []);
 
   const reset = useCallback(() => {
@@ -180,735 +165,812 @@ export default function Dashboard() {
 
   const finding = run.findings[0] ?? null;
   const hotFile = relativeFile(finding?.file, run.targetInfo?.path);
-  const running = run.phase === "running";
+  const hotLine = finding?.line_start ?? null;
+
+  const downloadProvenance = () => {
+    if (run.artifacts?.provenance) download("vayu-provenance.json", run.artifacts.provenance);
+  };
 
   return (
     <div className="dash">
-      <div className="dash-bg" aria-hidden="true">
-        <video className="dash-video" autoPlay muted loop playsInline>
-          <source
-            src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260809_012548_ef22562c-c0ae-4816-ad9d-f8922af4e6a7.mp4"
-            type="video/mp4"
-          />
-        </video>
-        <div className="dash-veil" />
-        <div className="dash-grain" />
-      </div>
+      <div className="shell">
+        {/* ---------------- top bar ---------------- */}
+        <header className="top">
+          <Link href="/" className="logo">
+            vayu<span>&gt;</span>
+          </Link>
+          <div className="filters">
+            <Filter label="Target">
+              <select value={target} onChange={(e) => setTarget(e.target.value)} disabled={running || !!customPath}>
+                {(status?.targets ?? []).map((t) => (
+                  <option key={t.path} value={t.path}>
+                    {t.id}
+                  </option>
+                ))}
+                {!status?.targets.length && <option value="">none</option>}
+              </select>
+            </Filter>
+            <Filter label="Engine">
+              <select value={mode} onChange={(e) => setMode(e.target.value as Mode)} disabled={running}>
+                {(Object.keys(MODE_LABEL) as Mode[]).map((m) => (
+                  <option key={m} value={m}>
+                    {MODE_LABEL[m]}
+                  </option>
+                ))}
+              </select>
+            </Filter>
+            <Filter label="Model" readOnly>
+              <span className="filter-value">{mode === "offline" ? "none" : status?.ollama.model ?? "qwen2.5-coder:3b"}</span>
+            </Filter>
+            <Filter label="Tools" readOnly>
+              <span className="filter-value tools">
+                <Dot ok={status?.engine.ok} title="Python engine" />
+                <Dot ok={status?.semgrep.ok} title={status?.semgrep.version ?? "Semgrep not found"} />
+                <Dot ok={status ? status.ollama.ok && status.ollama.modelInstalled : undefined} title={status?.ollama.ok ? "Ollama" : "Ollama offline"} />
+              </span>
+            </Filter>
+          </div>
+          <div className="top-right">
+            <label className="search">
+              <input
+                ref={searchRef}
+                value={customPath}
+                onChange={(e) => setCustomPath(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !running && start()}
+                placeholder="Scan a local path"
+                disabled={running}
+                aria-label="Local repository path"
+              />
+              <i className="fa-solid fa-magnifying-glass" />
+            </label>
+            <button className="icon-btn" onClick={loadStatus} aria-label="Recheck tools" title="Recheck tools">
+              <i className="fa-solid fa-gear" />
+            </button>
+          </div>
+        </header>
 
-      <div className="dash-frame">
-        <TopBar
-          status={status}
-          statusError={statusError}
-          target={target}
-          setTarget={setTarget}
-          customPath={customPath}
-          setCustomPath={setCustomPath}
-          mode={mode}
-          setMode={setMode}
-          disabled={running}
-          onRefresh={loadStatus}
-        />
-
-        <section className="hero-grid">
-          <aside className="side">
-            <div className="title-row">
-              <Link href="/" className="round-btn" aria-label="Back to home">
+        {/* ---------------- main stage ---------------- */}
+        <section className="stage">
+          <aside className="left">
+            <div className="heading">
+              <Link href="/" className="icon-btn" aria-label="Back">
                 <i className="fa-solid fa-arrow-left" />
               </Link>
               <div>
-                <h1 className="display title">
-                  System
+                <h1>
+                  Codebase
                   <br />
-                  Reasoning
+                  Analysis
                 </h1>
-                <p className="sub">
+                <p>
                   {run.repoMap
-                    ? `Data based on ${run.repoMap.total_lines.toLocaleString()} lines · ${run.repoMap.files.length} file${run.repoMap.files.length === 1 ? "" : "s"}`
-                    : "Find → Reason → Patch → Verify"}
+                    ? `Data based on ${run.repoMap.total_lines.toLocaleString()} lines in ${run.repoMap.files.length} file${run.repoMap.files.length === 1 ? "" : "s"}`
+                    : "No target scanned yet"}
                 </p>
               </div>
             </div>
 
-            <CodeDensity run={run} hotFile={hotFile} />
-            <StageSpikes run={run} />
+            <Intensity run={run} hotFile={hotFile} />
+            <Nesting run={run} hotFile={hotFile} />
+
+            <div className="left-controls">
+              <Filter label="" compact>
+                <select value={pins} onChange={(e) => setPins(e.target.value as PinMode)} aria-label="Pins">
+                  <option value="all">All pins</option>
+                  <option value="findings">Findings only</option>
+                  <option value="none">No pins</option>
+                </select>
+              </Filter>
+              <Filter label="" compact>
+                <select value="" onChange={(e) => e.target.value && setDrawer(e.target.value as Drawer)} aria-label="Open panel">
+                  <option value="">Last run</option>
+                  <option value="diff">Code &amp; diff</option>
+                  <option value="proof">Provenance</option>
+                  <option value="log">Engine log</option>
+                </select>
+              </Filter>
+              <button className="icon-btn sm" onClick={reset} disabled={running} aria-label="Reset" title="Reset">
+                <i className="fa-solid fa-rotate-right" />
+              </button>
+              <button className="icon-btn sm" onClick={() => setDrawer("log")} aria-label="Engine log" title="Engine log">
+                <i className="fa-solid fa-ellipsis" />
+              </button>
+              <button className="icon-btn sm" onClick={downloadProvenance} disabled={!run.artifacts} aria-label="Export provenance" title="Export provenance">
+                <i className="fa-solid fa-arrow-up-from-bracket" />
+              </button>
+            </div>
           </aside>
 
-          <div className="center">
-            <SystemField run={run} hotFile={hotFile} hotLine={finding?.line_start ?? null} />
-            {run.decision && <Verdict decision={run.decision} elapsed={run.elapsed} />}
-            {run.phase === "error" && run.error && (
-              <div className="field-error" role="alert">
-                <i className="fa-solid fa-circle-exclamation" />
-                <div>
-                  <strong>{run.error.stage} stopped</strong>
-                  <span>{run.error.message}</span>
-                  {/semgrep/i.test(run.error.message) && <code>pip install semgrep</code>}
-                </div>
-              </div>
-            )}
-            <Toolbar
-              run={run}
-              canRun={!!activeTarget && !running && (status?.engine.ok ?? true)}
-              hasReplay={hasReplay}
-              onRun={start}
-              onStop={stop}
-              onReplay={replay}
-              onReset={reset}
-            />
+          <div className="map">
+            <Terrain run={run} hotFile={hotFile} hotLine={hotLine} showPins={pins !== "none"} onHotspot={setHotspot} />
+            {pins === "findings" && <style>{`.terrain .pin:not(.pin-main){display:none}`}</style>}
+
+            <StatusPill run={run} />
+            {hotspot && finding && <Callout run={run} at={hotspot} hotFile={hotFile} hotLine={hotLine} onOpen={setDrawer} />}
+
+            <div className="toolbar">
+              <button className="icon-btn" onClick={reset} disabled={running} aria-label="Reset" title="Reset">
+                <i className="fa-solid fa-rotate-left" />
+              </button>
+              {running ? (
+                <button className="icon-btn on" onClick={stop} aria-label="Stop" title="Stop">
+                  <i className="fa-solid fa-stop" />
+                </button>
+              ) : (
+                <button className="icon-btn on" onClick={start} disabled={!activeTarget || status?.engine.ok === false} aria-label="Run VAYU" title="Run">
+                  <i className="fa-solid fa-play" />
+                </button>
+              )}
+              {STAGES.map((s) => (
+                <span key={s} className={`stage-dot ${run.stages[s].status}`} title={`${s} · ${run.stages[s].status}`}>
+                  <i className={`fa-solid ${STAGE_ICON[s]}`} />
+                </span>
+              ))}
+              {hasReplay && (
+                <button className="icon-btn" onClick={replay} disabled={running} aria-label="Replay recorded run" title="Replay recorded run">
+                  <i className="fa-solid fa-clock-rotate-left" />
+                </button>
+              )}
+              <span className="toolbar-mode">
+                {run.provider ? (run.provider === "ollama" ? "ollama" : "offline") : MODE_LABEL[mode].toLowerCase()}
+              </span>
+            </div>
           </div>
 
-          <aside className="gauges">
-            <div className="view-pills" role="tablist" aria-label="Detail view">
-              {(["live", "patch", "proof"] as Tab[]).map((t) => (
-                <button key={t} role="tab" aria-selected={tab === t} className={`pill ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
-                  {t === "live" ? "Live" : t === "patch" ? "Patch" : "Proof"}
+          <aside className="right">
+            <div className="tabs" role="tablist">
+              {(
+                [
+                  [null, "View"],
+                  ["diff", "Diff"],
+                  ["proof", "Provenance"],
+                ] as [Drawer, string][]
+              ).map(([key, label]) => (
+                <button key={label} role="tab" aria-selected={drawer === key} className={drawer === key ? "on" : ""} onClick={() => setDrawer(key)}>
+                  {label}
                 </button>
               ))}
             </div>
-            <Ring
-              label="AI Confidence"
-              value={run.reasoning ? Math.round(run.reasoning.confidence * 100) : null}
-              max={100}
-              suffix="%"
-              note="not proof"
-            />
-            <Ring
+
+            <Gauge label="Model Confidence" value={run.reasoning ? Math.round(run.reasoning.confidence * 100) : null} max={100} />
+            <Gauge
               label="Checks Passed"
               value={Object.keys(run.checks).length || run.stages.VERIFY.status !== "idle" ? Object.values(run.checks).filter((c) => c?.passed).length : null}
               max={4}
-              suffix="/4"
-              note={run.attempt > 1 ? `attempt ${run.attempt}` : undefined}
-              danger={Object.values(run.checks).some((c) => c && !c.passed)}
+              bad={Object.values(run.checks).some((c) => c && !c.passed)}
             />
+
+            <div className="right-foot">
+              <button className="icon-btn sm" onClick={() => searchRef.current?.focus()} aria-label="Scan another path" title="Scan another path">
+                <i className="fa-solid fa-plus" />
+              </button>
+              <button className="chip-btn" onClick={() => setPins(pins === "none" ? "all" : "none")} title="Toggle pins">
+                Findings {run.findings.length}
+                <i className={`fa-solid ${pins === "none" ? "fa-eye" : "fa-xmark"}`} />
+              </button>
+            </div>
           </aside>
+
+          {drawer && <DrawerPanel kind={drawer} run={run} history={history} onClose={() => setDrawer(null)} onSwitch={setDrawer} />}
         </section>
 
-        <section className="low-grid">
-          <StageGrid run={run} />
-          <CheckTiles run={run} />
+        {/* ---------------- lower band ---------------- */}
+        <section className="lower">
+          <StageBlocks run={run} hotFile={hotFile} onRun={start} onReset={reset} onExport={downloadProvenance} canRun={!running && !!activeTarget} />
+          <Checks run={run} onHistory={() => setDrawer("proof")} onExport={downloadProvenance} />
         </section>
-
-        <section className="details">
-          {tab === "live" && <LiveView run={run} hotLine={finding?.line_start ?? null} />}
-          {tab === "patch" && <PatchView run={run} />}
-          {tab === "proof" && <ProofView run={run} history={history} />}
-        </section>
-
-        <footer className="dash-foot">
-          <span>VAYU · AIKavach CRS</span>
-          <span>Runs locally · the model proposes, verification decides · original repository is never modified</span>
-        </footer>
       </div>
     </div>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/* Top bar                                                              */
-/* ------------------------------------------------------------------ */
-
-function TopBar(props: {
-  status: Status | null;
-  statusError: boolean;
-  target: string;
-  setTarget: (v: string) => void;
-  customPath: string;
-  setCustomPath: (v: string) => void;
-  mode: Mode;
-  setMode: (m: Mode) => void;
-  disabled: boolean;
-  onRefresh: () => void;
-}) {
-  const { status } = props;
-  const chips: { label: string; ok: boolean | null; title: string }[] = [
-    { label: "Engine", ok: status ? status.engine.ok : props.statusError ? false : null, title: status?.engine.ok ? `Python ${status.engine.version}` : "python -m crs.stream not importable" },
-    { label: "Semgrep", ok: status ? status.semgrep.ok : null, title: status?.semgrep.version ?? "Install with: pip install semgrep" },
-    {
-      label: "Ollama",
-      ok: status ? status.ollama.ok && status.ollama.modelInstalled : null,
-      title: status?.ollama.ok ? (status.ollama.modelInstalled ? status.ollama.model : `${status.ollama.model} not pulled`) : "Not running — Auto mode falls back to offline rules",
-    },
-  ];
-
-  return (
-    <header className="topbar">
-      <Link href="/" className="brand display">
-        VAYU<span>&gt;</span>
-      </Link>
-
-      <div className="filters">
-        <label className="pill-select">
-          <span>Target</span>
-          <select value={props.target} onChange={(e) => props.setTarget(e.target.value)} disabled={props.disabled || !!props.customPath}>
-            {(status?.targets ?? []).map((t) => (
-              <option key={t.path} value={t.path}>
-                {t.label}
-              </option>
-            ))}
-            {!status?.targets.length && <option value="">No samples</option>}
-          </select>
-          <i className="fa-solid fa-chevron-down" />
-        </label>
-        <label className="pill-select">
-          <span>Engine</span>
-          <select value={props.mode} onChange={(e) => props.setMode(e.target.value as Mode)} disabled={props.disabled}>
-            {(Object.keys(MODE_LABEL) as Mode[]).map((m) => (
-              <option key={m} value={m}>
-                {MODE_LABEL[m]}
-              </option>
-            ))}
-          </select>
-          <i className="fa-solid fa-chevron-down" />
-        </label>
-        <label className="pill-select hide-md">
-          <span>Model</span>
-          <b>{props.mode === "offline" ? "none" : status?.ollama.model ?? "qwen2.5-coder:3b"}</b>
-        </label>
-      </div>
-
-      <div className="topbar-right">
-        <label className="search">
-          <input
-            value={props.customPath}
-            onChange={(e) => props.setCustomPath(e.target.value)}
-            placeholder="Scan any local path…"
-            disabled={props.disabled}
-            aria-label="Local repository path"
-          />
-          <i className="fa-solid fa-magnifying-glass" />
-        </label>
-        <div className="chips">
-          {chips.map((c) => (
-            <span key={c.label} className={`chip ${c.ok === null ? "" : c.ok ? "ok" : "bad"}`} title={c.title}>
-              <i />
-              {c.label}
-            </span>
-          ))}
-        </div>
-        <button className="round-btn" onClick={props.onRefresh} aria-label="Recheck tools">
-          <i className="fa-solid fa-gear" />
-        </button>
-      </div>
-    </header>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Left column charts                                                   */
-/* ------------------------------------------------------------------ */
-
-function CodeDensity({ run, hotFile }: { run: RunState; hotFile: string | null }) {
-  const map = run.repoMap;
-  const single = map && map.files.length === 1 ? map.files[0] : null;
-  const values = single ? single.lines : map ? map.files.map((f) => f.line_count) : [];
-  const shown = values.slice(0, 64);
-  const max = Math.max(1, ...shown);
-  const hotIndex = single
-    ? (run.findings[0]?.line_start ?? 0) - 1
-    : map
-      ? map.files.findIndex((f) => f.path === hotFile)
-      : -1;
-
-  return (
-    <div className="mini">
-      <h3>{single ? `Line Shape · ${single.path}` : "Code Density by File"}</h3>
-      <div className="spikes" aria-hidden={!map}>
-        {shown.length ? (
-          shown.map((v, i) => (
-            <span key={i} className={`spike ${i === hotIndex ? "hot" : ""}`} style={{ height: `${8 + (v / max) * 82}%` }}>
-              <i />
-            </span>
-          ))
-        ) : (
-          Array.from({ length: 48 }, (_, i) => <span key={i} className="spike ghost" style={{ height: `${10 + ((i * 37) % 23)}%` }} />)
-        )}
-      </div>
-      <div className="axis">
-        <span>{shown.length ? Math.min(...shown) : "—"}</span>
-        <span>{single ? "chars / line" : "lines / file"}</span>
-        <span>{shown.length ? max : "—"}</span>
-      </div>
-    </div>
-  );
-}
-
-function StageSpikes({ run }: { run: RunState }) {
-  const durations = STAGES.map((s) => {
-    const st = run.stages[s];
-    if (st.start === undefined) return 0;
-    return Math.max(0.01, (st.end ?? run.clock) - st.start);
-  });
-  const total = durations.reduce((a, b) => a + b, 0);
-  const max = Math.max(0.01, ...durations);
-  return (
-    <div className="mini">
-      <h3>Stage Timing</h3>
-      <div className="peaks">
-        {STAGES.map((s, i) => (
-          <div key={s} className={`peak ${run.stages[s].status}`}>
-            <svg viewBox="0 0 40 60" preserveAspectRatio="none">
-              <polygon points={`0,60 20,${60 - Math.max(6, (durations[i] / max) * 56)} 40,60`} />
-            </svg>
-            <span>{s}</span>
-            <em>{durations[i] ? `${durations[i].toFixed(durations[i] < 1 ? 2 : 1)}s` : "—"}</em>
-          </div>
-        ))}
-      </div>
-      <div className="axis">
-        <span>0s</span>
-        <span>total {total ? `${total.toFixed(2)}s` : "—"}</span>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Centre toolbar + verdict                                             */
-/* ------------------------------------------------------------------ */
-
-function Toolbar(props: {
-  run: RunState;
-  canRun: boolean;
-  hasReplay: boolean;
-  onRun: () => void;
-  onStop: () => void;
-  onReplay: () => void;
-  onReset: () => void;
-}) {
-  const { run } = props;
-  const running = run.phase === "running";
-  return (
-    <div className="toolbar">
-      <button className="round-btn" onClick={props.onReset} aria-label="Reset" disabled={running}>
-        <i className="fa-solid fa-rotate-left" />
-      </button>
-      {props.hasReplay && (
-        <button className="round-btn" onClick={props.onReplay} aria-label="Replay recorded run" title="Replay recorded run" disabled={running}>
-          <i className="fa-solid fa-clock-rotate-left" />
-        </button>
-      )}
-      {running ? (
-        <button className="round-btn primary" onClick={props.onStop} aria-label="Stop run">
-          <i className="fa-solid fa-stop" />
-        </button>
-      ) : (
-        <button className="round-btn primary" onClick={props.onRun} disabled={!props.canRun} aria-label="Run VAYU">
-          <i className="fa-solid fa-play" />
-        </button>
-      )}
-      <div className="stage-chips">
-        {STAGES.map((s) => (
-          <span key={s} className={`stage-chip ${run.stages[s].status}`}>
-            <i className="fa-solid fa-circle" />
-            {s}
-          </span>
-        ))}
-      </div>
-      <span className="toolbar-status">
-        {run.replay && <b className="tag">Replay</b>}
-        {running ? "Analysing…" : run.phase === "idle" ? "Ready" : run.phase === "error" ? "Stopped" : "Complete"}
-      </span>
-    </div>
-  );
-}
-
-function Verdict({ decision, elapsed }: { decision: string; elapsed: number | null }) {
-  return (
-    <div className={`verdict ${decision.toLowerCase()}`}>
-      <span className="display">{decision}</span>
-      <small>
-        {decision === "VERIFIED"
-          ? "all four checks passed"
-          : decision === "CLEAN"
-            ? "no findings in this target"
-            : "verification failed closed"}
-        {elapsed !== null ? ` · ${elapsed}s` : ""}
-      </small>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Right column gauges                                                  */
-/* ------------------------------------------------------------------ */
-
-function Ring({ label, value, max, suffix, note, danger }: { label: string; value: number | null; max: number; suffix: string; note?: string; danger?: boolean }) {
-  const r = 34;
-  const c = 2 * Math.PI * r;
-  const frac = value === null ? 0 : Math.max(0, Math.min(1, value / max));
-  const angle = -90 + frac * 360;
-  const id = label.replace(/\s/g, "");
-  return (
-    <div className={`ring ${danger ? "danger" : ""}`}>
-      <svg viewBox="0 0 90 90" aria-hidden="true">
-        <defs>
-          <linearGradient id={`g-${id}`} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#c9b8f2" />
-            <stop offset="60%" stopColor="#e6a7c9" />
-            <stop offset="100%" stopColor={danger ? "#ff6a4d" : "#f0a27a"} />
-          </linearGradient>
-        </defs>
-        <circle cx="45" cy="45" r={r} className="ring-track" />
-        <circle
-          cx="45"
-          cy="45"
-          r={r}
-          className="ring-arc"
-          stroke={`url(#g-${id})`}
-          strokeDasharray={`${c * frac} ${c}`}
-          transform="rotate(-90 45 45)"
-        />
-        <line x1="45" y1="45" x2={45 + Math.cos((angle * Math.PI) / 180) * (r - 8)} y2={45 + Math.sin((angle * Math.PI) / 180) * (r - 8)} className="ring-needle" />
-        <circle cx="45" cy="45" r="2.4" className="ring-hub" />
-      </svg>
-      <span className="ring-label">{label}</span>
-      <span className="ring-value">
-        {value === null ? "—" : value}
-        <small>{value === null ? "" : suffix}</small>
-      </span>
-      {note && <span className="ring-note">{note}</span>}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Lower grid                                                           */
-/* ------------------------------------------------------------------ */
 
 const STAGE_ICON: Record<StageName, string> = {
   FIND: "fa-magnifying-glass",
-  REASON: "fa-brain",
+  REASON: "fa-diagram-project",
   PATCH: "fa-code",
   VERIFY: "fa-shield-halved",
 };
 
-function StageGrid({ run }: { run: RunState }) {
-  const columns = 30;
-  const span = Math.max(run.clock, 0.001);
-  const toCol = (t: number) => Math.min(columns - 1, Math.floor((t / span) * (columns - 1)));
+/* ---------------- small building blocks ---------------- */
+
+function Filter({ label, children, readOnly, compact }: { label: string; children: React.ReactNode; readOnly?: boolean; compact?: boolean }) {
   return (
-    <div className="card stage-grid">
-      <div className="card-head">
-        <h3>Pipeline by Stage</h3>
-        <span className="muted">{run.clock ? `${run.clock.toFixed(2)}s elapsed` : "idle"}</span>
-      </div>
-      <div className="grid-rows">
-        {STAGES.map((s) => {
-          const st = run.stages[s];
-          const from = st.start !== undefined ? toCol(st.start) : -1;
-          const to = st.start !== undefined ? toCol(st.end ?? run.clock) : -1;
-          return (
-            <div key={s} className="grid-row">
-              <span className="row-label">{s.charAt(0) + s.slice(1).toLowerCase()}</span>
-              <div className="dots">
-                {Array.from({ length: columns }, (_, i) => {
-                  const lit = i >= from && i <= to && from >= 0;
-                  return <i key={i} className={lit ? `lit ${st.status}` : ""} />;
-                })}
-                {st.status !== "idle" && (
-                  <span className={`grid-pin ${st.status}`} style={{ left: `${((to + 0.5) / columns) * 100}%` }}>
-                    <i className={`fa-solid ${st.status === "failed" ? "fa-xmark" : STAGE_ICON[s]}`} />
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+    <label className={`filter ${compact ? "compact" : ""}`}>
+      {label && <span className="filter-label">{label}</span>}
+      <span className="filter-box">
+        {children}
+        {!readOnly && <i className="fa-solid fa-chevron-down" />}
+      </span>
+    </label>
+  );
+}
+
+function Dot({ ok, title }: { ok: boolean | undefined; title: string }) {
+  return <i className={`tool ${ok === undefined ? "" : ok ? "ok" : "bad"}`} title={title} />;
+}
+
+function download(name: string, data: unknown) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 500);
+}
+
+function StatusPill({ run }: { run: RunState }) {
+  const active = STAGES.find((s) => run.stages[s].status === "running");
+  let text = "Idle";
+  let tone = "";
+  if (run.phase === "running") text = active ? `${cap(active)}ing` : "Starting";
+  if (run.phase === "done") {
+    text = run.decision === "CLEAN" ? "No findings" : cap(run.decision ?? "done");
+    tone = run.decision === "REJECTED" ? "bad" : "ok";
+  }
+  if (run.phase === "error") {
+    text = `${cap(run.error?.stage ?? "run")} failed`;
+    tone = "bad";
+  }
+  return (
+    <div className={`status ${tone}`}>
+      <i className={run.phase === "running" ? "live" : ""} />
+      {text}
+      {run.elapsed !== null && <span>{run.elapsed}s</span>}
+      {run.replay && <span>replay</span>}
+      {run.phase === "error" && run.error && <em title={run.error.message}>{run.error.message}</em>}
     </div>
   );
 }
 
-function CheckTiles({ run }: { run: RunState }) {
-  return (
-    <div className="card checks">
-      <div className="card-head">
-        <h3>Verification by Check</h3>
-        <span className="muted">fail-closed · all four required</span>
-      </div>
-      <div className="tiles">
-        {CHECKS.map((c) => {
-          const state = run.checks[c.id];
-          const pending = run.stages.VERIFY.status === "running" && !state;
-          return (
-            <div key={c.id} className={`tile ${state ? (state.passed ? "pass" : "fail") : pending ? "pending" : ""}`}>
-              <div className="tile-head">
-                <i className={`fa-solid ${c.icon}`} />
-                {c.label}
-              </div>
-              <span className="tile-hint">{c.hint}</span>
-              <span className="tile-value display">{state ? (state.passed ? "PASS" : "FAIL") : pending ? "…" : "—"}</span>
-              <span className="tile-reason" title={state?.reason}>
-                {state?.reason ?? (pending ? "running in temp workspace" : "awaiting patch")}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
+function cap(s: string) {
+  const v = s.toLowerCase();
+  if (v === "find") return "Scan";
+  return v.charAt(0).toUpperCase() + v.slice(1);
 }
 
-/* ------------------------------------------------------------------ */
-/* Detail views                                                         */
-/* ------------------------------------------------------------------ */
-
-function LiveView({ run, hotLine }: { run: RunState; hotLine: number | null }) {
+function Callout({
+  run,
+  at,
+  hotFile,
+  hotLine,
+  onOpen,
+}: {
+  run: RunState;
+  at: { x: number; y: number; w: number; h: number };
+  hotFile: string | null;
+  hotLine: number | null;
+  onOpen: (d: Drawer) => void;
+}) {
+  const [open, setOpen] = useState<string | null>(null);
   const finding = run.findings[0];
   const r = run.reasoning;
+  const v = run.verification;
+  const rows: { id: string; icon: string; label: string; body: string | null }[] = [
+    { id: "cause", icon: "fa-crosshairs", label: "Root cause", body: r?.root_cause ?? null },
+    { id: "impact", icon: "fa-bolt", label: "Impact", body: r?.security_impact ?? null },
+    { id: "fix", icon: "fa-wrench", label: run.patch ? "Patch" : "Remediation", body: r?.remediation_strategy ?? null },
+    { id: "verify", icon: "fa-shield-halved", label: v ? (v.approved ? "Verified" : "Rejected") : "Verification", body: v?.reason ?? null },
+  ].filter((row) => row.body);
+
+  const flip = at.x > at.w - 370;
+  const up = at.y > at.h * 0.52;
+  const verified = run.decision === "VERIFIED";
   return (
-    <div className="detail-grid">
-      <div className="card">
-        <div className="card-head">
-          <h3>Finding</h3>
-          {finding && <span className={`sev sev-${finding.severity.toLowerCase()}`}>{finding.severity}</span>}
-        </div>
-        {finding ? (
-          <>
-            <p className="lead">{finding.vulnerability_type}</p>
-            <p className="muted small">{finding.title}</p>
-            <CodeBlock context={run.evidence} hotLine={hotLine} />
-            <p className="muted tiny">
-              {finding.evidence[0]?.raw_reference} · scanner confidence {Math.round(finding.confidence * 100)}% · shown to the model as untrusted data
-            </p>
-          </>
-        ) : (
-          <Empty text={run.decision === "CLEAN" ? "No vulnerabilities detected." : "Findings appear here once FIND completes."} />
-        )}
+    <div className={`callout ${flip ? "flip" : ""} ${up ? "up" : ""}`} style={{ left: at.x, top: at.y }}>
+      <div className="callout-head">
+        <span className="callout-main">
+          <i className={`fa-solid ${verified ? "fa-shield-halved ok" : "fa-triangle-exclamation hot"}`} />
+          <span className="callout-text" title={`${hotFile}:${hotLine}`}>
+            {kind(finding?.vulnerability_type)} in {hotFile?.split("/").pop()}:{hotLine}
+          </span>
+          <i className="fa-solid fa-chevron-up dim" />
+        </span>
+        <button className="icon-btn sm" onClick={() => onOpen("diff")} aria-label="Open code and diff" title="Code & diff">
+          <i className="fa-solid fa-sliders" />
+        </button>
+        <button className="icon-btn sm" onClick={() => onOpen("log")} aria-label="Open engine log" title="Engine log">
+          <i className="fa-solid fa-magnifying-glass" />
+        </button>
       </div>
-
-      <div className="card">
-        <div className="card-head">
-          <h3>AI Reasoning</h3>
-          <span className="muted">{run.provider === "ollama" ? `ollama · ${run.model}` : run.provider ? "offline rules · no model" : ""}</span>
-        </div>
-        {r ? (
-          <div className="reason">
-            <Fact icon="fa-xmark" tone="hot" title="Root cause" text={r.root_cause} />
-            <Fact icon="fa-triangle-exclamation" tone="warn" title="Security impact" text={r.security_impact} />
-            <Fact icon="fa-check" tone="safe" title="Remediation" text={r.remediation_strategy} />
-            <div className="refs">
-              {r.evidence_references.map((ref) => (
-                <code key={ref}>{ref}</code>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <Empty text="Root cause, impact and remediation stream in during REASON." />
-        )}
-      </div>
-
-      <div className="card terminal-card">
-        <div className="card-head">
-          <h3>Engine Log</h3>
-          <span className="muted">{run.log.length} events</span>
-        </div>
-        <Terminal lines={run.log} />
-      </div>
-    </div>
-  );
-}
-
-function PatchView({ run }: { run: RunState }) {
-  const p = run.patch;
-  return (
-    <div className="detail-grid two">
-      <div className="card">
-        <div className="card-head">
-          <h3>Unified Diff</h3>
-          {p && <span className="muted">{p.target_file}</span>}
-        </div>
-        {p ? <Diff diff={p.unified_diff} /> : <Empty text="The patch appears once PATCH completes." />}
-      </div>
-      <div className="card">
-        <div className="card-head">
-          <h3>How the patch was made</h3>
-        </div>
-        <ol className="steps">
-          <li className={run.patch ? "done" : ""}>
-            <b>Model proposes one line.</b> It may only return a <code>replacement_line</code>; extra fields are rejected.
-          </li>
-          <li className={run.patch ? "done" : ""}>
-            <b>Trusted code builds the diff.</b> File path, hunk header and metadata come from the scanner, not the model.
-          </li>
-          <li className={run.patch ? "done" : ""}>
-            <b>Structural validation.</b> Single file, no path traversal, well-formed hunk.
-          </li>
-          <li className={run.verification ? (run.verification.approved ? "done" : "fail") : ""}>
-            <b>Applied only in a temp copy.</b> Build, tests, security regression and static rescan decide.
-          </li>
-        </ol>
-        {p && <p className="muted small">{p.rationale}</p>}
-      </div>
-    </div>
-  );
-}
-
-function ProofView({ run, history }: { run: RunState; history: HistoryEntry[] }) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- provenance is a free-form JSON record
-  const prov = run.artifacts?.provenance as Record<string, any> | undefined;
-  const download = (name: string, data: unknown) => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 500);
-  };
-  return (
-    <div className="detail-grid two">
-      <div className="card">
-        <div className="card-head">
-          <h3>Provenance</h3>
-          {prov && <span className={`decision ${String(prov.final_decision).toLowerCase()}`}>{prov.final_decision}</span>}
-        </div>
-        {prov ? (
-          <>
-            <dl className="kv">
-              <dt>Run ID</dt>
-              <dd>{prov.run_id}</dd>
-              <dt>Repository SHA-256</dt>
-              <dd>{prov.target?.repository_sha256}</dd>
-              <dt>Patch SHA-256</dt>
-              <dd>{prov.patch?.patch_sha256}</dd>
-              <dt>Reasoning</dt>
-              <dd>
-                {prov.reasoning?.provider} · {prov.reasoning?.model}
-              </dd>
-              <dt>Policy</dt>
-              <dd>
-                {prov.safety?.verification_policy} · AI output treated as proof: {String(prov.safety?.ai_output_treated_as_proof)}
-              </dd>
-              <dt>Original modified</dt>
-              <dd>{String(prov.safety?.original_repository_modified)}</dd>
-            </dl>
-            <div className="downloads">
-              <button className="pill on" onClick={() => download("vayu-provenance.json", prov)}>
-                <i className="fa-solid fa-download" /> Provenance
-              </button>
-              {run.artifacts?.sarif != null && (
-                <button className="pill" onClick={() => download("vayu.sarif", run.artifacts?.sarif)}>
-                  <i className="fa-solid fa-download" /> SARIF
-                </button>
-              )}
-              {run.artifacts?.slsa != null && (
-                <button className="pill" onClick={() => download("vayu-slsa.json", run.artifacts?.slsa)}>
-                  <i className="fa-solid fa-signature" /> Signed SLSA
-                </button>
-              )}
-            </div>
-          </>
-        ) : (
-          <Empty text="A signed audit record is produced when a run completes." />
-        )}
-      </div>
-      <div className="card">
-        <div className="card-head">
-          <h3>Recent Runs</h3>
-          <span className="muted">this browser</span>
-        </div>
-        {history.length ? (
-          <ul className="history">
-            {history.map((h) => (
-              <li key={h.id}>
-                <span className={`dot ${h.decision.toLowerCase()}`} />
-                <b>{h.target}</b>
-                <span className="muted">{h.provider}</span>
-                <span className={`decision ${h.decision.toLowerCase()}`}>{h.decision}</span>
-                <span className="muted">{h.elapsed !== null ? `${h.elapsed}s` : ""}</span>
-                <time className="muted">{new Date(h.when).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <Empty text="Completed runs are listed here." />
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Small pieces                                                         */
-/* ------------------------------------------------------------------ */
-
-function CodeBlock({ context, hotLine }: { context: RunState["evidence"]; hotLine: number | null }) {
-  const rows = useMemo(
-    () =>
-      (context?.content ?? "").split("\n").map((line) => {
-        const m = /^(\d+): ?(.*)$/.exec(line);
-        return m ? { n: Number(m[1]), text: m[2] } : { n: 0, text: line };
-      }),
-    [context],
-  );
-  if (!context) return <Empty text="Loading evidence window…" />;
-  return (
-    <pre className="code">
       {rows.map((row) => (
-        <div key={row.n} className={row.n === hotLine ? "hot" : ""}>
-          <span>{row.n}</span>
-          <code>{row.text || " "}</code>
+        <div key={row.id} className={`callout-row ${open === row.id ? "open" : ""}`}>
+          <button onClick={() => setOpen(open === row.id ? null : row.id)} aria-expanded={open === row.id}>
+            <span className="avatar">
+              <i className={`fa-solid ${row.icon}`} />
+            </span>
+            {row.label}
+            <i className="fa-solid fa-chevron-down dim" />
+          </button>
+          {open === row.id && <p>{row.body}</p>}
         </div>
       ))}
-    </pre>
+    </div>
   );
 }
 
-function Diff({ diff }: { diff: string }) {
+function kind(type: string | undefined) {
+  if (!type) return "Finding";
+  if (/shell/i.test(type)) return "Command injection";
+  return type;
+}
+
+/* ---------------- left charts ---------------- */
+
+function Intensity({ run, hotFile }: { run: RunState; hotFile: string | null }) {
+  const map = run.repoMap;
+  const single = map?.files.length === 1 ? map.files[0] : null;
+  const values = single ? single.lines : map ? map.files.map((f) => f.line_count) : [];
+  const shown = values.slice(0, 90);
+  const hot = single ? (run.findings[0]?.line_start ?? 0) - 1 : map ? map.files.findIndex((f) => f.path === hotFile) : -1;
+  const max = Math.max(1, ...shown);
+  const peak = shown.indexOf(max);
+  const W = 210;
+  const H = 70;
+  const n = Math.max(shown.length, 1);
+  const x = (i: number) => 4 + (i / Math.max(n - 1, 1)) * (W - 8);
+  const markers = shown.length ? [hot >= 0 && hot < shown.length ? hot : -1, peak].filter((v, i, a) => v >= 0 && a.indexOf(v) === i) : [];
+
   return (
-    <pre className="code diff">
-      {diff
-        .split("\n")
-        .filter((l, i, arr) => !(i === arr.length - 1 && l === ""))
-        .map((line, i) => {
-          const cls = line.startsWith("+++") || line.startsWith("---") ? "meta" : line.startsWith("@@") ? "hunk" : line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "";
+    <div className="chart">
+      <h3>{single ? "Code Intensity by Line" : "Code Intensity by File"}</h3>
+      <svg viewBox={`0 0 ${W} ${H + 28}`} className="chart-svg" aria-hidden="true">
+        <line x1="0" x2={W} y1={H} y2={H} className="base" />
+        {shown.length
+          ? shown.map((v, i) => {
+              const h = 4 + (v / max) * (H - 10);
+              return (
+                <g key={i}>
+                  <line x1={x(i)} x2={x(i)} y1={H} y2={H - h} className={i === hot ? "bar hot" : "bar"} />
+                  {(i === hot || i === peak || i % 7 === 0) && <circle cx={x(i)} cy={H - h} r={i === hot ? 2 : 1.3} className={i === hot ? "cap hot" : "cap"} />}
+                </g>
+              );
+            })
+          : Array.from({ length: 60 }, (_, i) => <line key={i} x1={x(i * 1.5)} x2={x(i * 1.5)} y1={H} y2={H - 3 - ((i * 37) % 11)} className="bar ghost" />)}
+        {markers.map((m) => (
+          <g key={m}>
+            <line x1={x(m)} x2={x(m)} y1={H} y2={H + 9} className="tick" />
+            <text x={x(m)} y={H + 22} textAnchor="middle" className={m === hot ? "label hot" : "label"}>
+              {shown[m]}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function Nesting({ run, hotFile }: { run: RunState; hotFile: string | null }) {
+  const map = run.repoMap;
+  const items = useMemo(() => {
+    if (!map) return [] as { v: number; hot: boolean }[];
+    if (map.files.length === 1) {
+      const f = map.files[0];
+      const chunk = Math.max(1, Math.ceil(f.lines.length / 14));
+      const hotLine = (run.findings[0]?.line_start ?? 0) - 1;
+      const out: { v: number; hot: boolean }[] = [];
+      for (let i = 0; i < f.lines.length; i += chunk) {
+        const idx = f.indent.slice(i, i + chunk).filter((_, k) => f.lines[i + k] > 0);
+        out.push({ v: idx.length ? Math.max(...idx) : 0, hot: hotLine >= i && hotLine < i + chunk });
+      }
+      return out;
+    }
+    return map.files.slice(0, 16).map((f) => {
+      const idx = f.indent.filter((_, k) => f.lines[k] > 0);
+      return { v: idx.length ? Math.max(...idx) : 0, hot: f.path === hotFile };
+    });
+  }, [map, hotFile, run.findings]);
+
+  const W = 210;
+  const H = 46;
+  const max = Math.max(4, ...items.map((i) => i.v));
+  const n = items.length || 14;
+  const step = (W - 16) / n;
+  const hotIdx = items.findIndex((i) => i.hot);
+  const markIdx = hotIdx >= 0 ? hotIdx : items.length ? items.map((i) => i.v).indexOf(max) : -1;
+  const mx = markIdx >= 0 ? 8 + step * (markIdx + 0.5) : W / 2;
+
+  return (
+    <div className="chart nesting">
+      <h3>Nesting Depth</h3>
+      <svg viewBox={`0 0 ${W} ${H + 46}`} className="chart-svg" aria-hidden="true">
+        {markIdx >= 0 && (
+          <>
+            <text x={mx} y="10" textAnchor="middle" className={hotIdx >= 0 ? "label hot" : "label"}>
+              {items[markIdx].v}
+            </text>
+            <line x1={mx} x2={mx} y1="16" y2={H + 30} className="marker" />
+            <circle cx={mx} cy={H + 30} r="2" className="cap" />
+          </>
+        )}
+        <line x1="0" x2={W} y1={H + 18} y2={H + 18} className="base dotted" />
+        {(items.length ? items : Array.from({ length: 14 }, (_, i) => ({ v: (i * 5) % 9, hot: false }))).map((it, i) => {
+          const cx = 8 + step * (i + 0.5);
+          const h = 4 + (it.v / max) * (H - 8);
           return (
-            <div key={i} className={cls}>
-              <code>{line}</code>
+            <polygon
+              key={i}
+              points={`${cx - step * 0.32},${H + 18} ${cx},${H + 18 - h} ${cx + step * 0.32},${H + 18}`}
+              className={!items.length ? "tri ghost" : it.hot ? "tri hot" : "tri"}
+            />
+          );
+        })}
+        <text x="2" y={H + 42} className="label">
+          {items.length ? Math.min(...items.map((i) => i.v)) : ""}
+        </text>
+        <text x={W - 2} y={H + 42} textAnchor="end" className="label">
+          {items.length ? max : ""}
+        </text>
+      </svg>
+    </div>
+  );
+}
+
+/* ---------------- right gauges ---------------- */
+
+function Gauge({ label, value, max, bad }: { label: string; value: number | null; max: number; bad?: boolean }) {
+  const r = 30;
+  const c = 2 * Math.PI * r;
+  const f = value === null ? 0 : Math.max(0, Math.min(1, value / max));
+  const a = ((-90 + f * 360) * Math.PI) / 180;
+  const id = label.replace(/\W/g, "");
+  return (
+    <div className={`gauge ${bad ? "bad" : ""}`}>
+      <svg viewBox="0 0 80 80" aria-hidden="true">
+        <defs>
+          <linearGradient id={`gg-${id}`} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#c9b8f2" />
+            <stop offset="1" stopColor={bad ? "#ff6a4d" : "#f0a27a"} />
+          </linearGradient>
+        </defs>
+        <circle cx="40" cy="40" r={r} className="track" />
+        <circle cx="40" cy="40" r={r} className="arc" stroke={`url(#gg-${id})`} strokeDasharray={`${c * f} ${c}`} transform="rotate(-90 40 40)" />
+        <line x1="40" y1="40" x2={40 + Math.cos(a) * (r + 6)} y2={40 + Math.sin(a) * (r + 6)} className="needle" />
+        <circle cx="40" cy="40" r="1.6" className="hub" />
+      </svg>
+      <span className="gauge-label">{label}</span>
+      <span className="gauge-value">
+        {value ?? "—"}
+        <small> / {max}</small>
+      </span>
+    </div>
+  );
+}
+
+/* ---------------- lower band ---------------- */
+
+function StageBlocks({
+  run,
+  hotFile,
+  onRun,
+  onReset,
+  onExport,
+  canRun,
+}: {
+  run: RunState;
+  hotFile: string | null;
+  onRun: () => void;
+  onReset: () => void;
+  onExport: () => void;
+  canRun: boolean;
+}) {
+  const COLS = 36;
+  const first = 5;
+  const last = 30;
+  const span = Math.max(run.clock, 0.001);
+  const col = (t: number) => Math.round(first + (t / span) * (last - first));
+  const started = STAGES.some((s) => run.stages[s].start !== undefined);
+  const finding = run.findings[0];
+
+  return (
+    <div className="blocks">
+      <div className="band-head">
+        <h3>Pipeline by Stage</h3>
+        <button className="icon-btn sm" onClick={onRun} disabled={!canRun} aria-label="Run" title="Run">
+          <i className="fa-solid fa-arrow-up" />
+        </button>
+      </div>
+      <div className="blocks-body">
+        <div className="row-labels">
+          {STAGES.map((s) => (
+            <span key={s}>{s.charAt(0) + s.slice(1).toLowerCase()}</span>
+          ))}
+        </div>
+        <div className="dotfield" style={{ "--cols": COLS } as React.CSSProperties}>
+          {STAGES.map((s, row) => (
+            <div key={s} className="dotrow">
+              {Array.from({ length: COLS }, (_, i) => {
+                const st = run.stages[s];
+                const lit = st.start !== undefined && i >= col(st.start) && i <= col(st.end ?? run.clock);
+                return <i key={i} className={lit ? `lit ${st.status}` : row % 2 ? "alt" : ""} />;
+              })}
+              {run.stages[s].status !== "idle" && (
+                <span className="pin" style={{ left: `${((col(run.stages[s].end ?? run.clock) + 0.5) / COLS) * 100}%` }}>
+                  <i
+                    className={`fa-solid ${
+                      run.stages[s].status === "failed"
+                        ? "fa-xmark bad"
+                        : s === "FIND" && finding
+                          ? "fa-triangle-exclamation hot"
+                          : run.stages[s].status === "running"
+                            ? "fa-circle-notch fa-spin"
+                            : "fa-shield-halved ok"
+                    }`}
+                  />
+                </span>
+              )}
+            </div>
+          ))}
+          {started && (
+            <div className="selection" style={{ left: `${(first / COLS) * 100}%`, width: `${((last - first + 1) / COLS) * 100}%` }}>
+              <i className="corner tl" />
+              <i className="corner tr" />
+              <i className="corner bl" />
+              <i className="corner br" />
+            </div>
+          )}
+          <div className="cluster">
+            <div className="cluster-btns">
+              <button className="icon-btn sm" onClick={onReset} aria-label="Reset" title="Reset">
+                <i className="fa-solid fa-rotate-right" />
+              </button>
+              <button className="icon-btn on" onClick={onRun} disabled={!canRun} aria-label="Run" title="Run">
+                <i className="fa-solid fa-play" />
+              </button>
+              <button className="icon-btn sm" onClick={onExport} disabled={!run.artifacts} aria-label="Export" title="Export provenance">
+                <i className="fa-solid fa-arrow-up-from-bracket" />
+              </button>
+            </div>
+            <span className="cluster-pill">
+              {finding ? (
+                <>
+                  <i className={`fa-solid ${run.decision === "VERIFIED" ? "fa-shield-halved ok" : "fa-triangle-exclamation hot"}`} />
+                  {kind(finding.vulnerability_type)} in {shortPath(hotFile)}
+                </>
+              ) : run.decision === "CLEAN" ? (
+                <>
+                  <i className="fa-solid fa-shield-halved ok" />
+                  No findings
+                </>
+              ) : (
+                <>
+                  <i className="fa-solid fa-circle-dot dim" />
+                  {run.phase === "running" ? "Scanning" : "Ready to scan"}
+                </>
+              )}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Checks({ run, onHistory, onExport }: { run: RunState; onHistory: () => void; onExport: () => void }) {
+  const verifyStart = run.stages.VERIFY.start ?? 0;
+  const timings = CHECKS.map((c, i) => {
+    const st = run.checks[c.id];
+    if (!st) return null;
+    const before = i > 0 ? run.checks[CHECKS[i - 1].id]?.at : undefined;
+    return Math.max(0, st.at - (before ?? verifyStart));
+  });
+  return (
+    <div className="checks">
+      <div className="band-head">
+        <h3>Verification by Check</h3>
+        <div className="band-actions">
+          <button className="icon-btn sm" onClick={onHistory} aria-label="Run history" title="Run history">
+            <i className="fa-regular fa-calendar" />
+          </button>
+          <button className="icon-btn sm" onClick={onExport} disabled={!run.artifacts} aria-label="Export" title="Export provenance">
+            <i className="fa-solid fa-arrow-up" />
+          </button>
+        </div>
+      </div>
+      <div className="cols">
+        {CHECKS.map((c, i) => {
+          const st = run.checks[c.id];
+          const pending = run.stages.VERIFY.status === "running" && !st;
+          return (
+            <div key={c.id} className={`col ${st ? (st.passed ? "pass" : "fail") : pending ? "pending" : ""}`} title={st?.reason}>
+              <div className="col-head">
+                <i className={`fa-solid ${st ? (st.passed ? "fa-shield-halved ok" : "fa-triangle-exclamation bad") : c.icon}`} />
+                {c.label}
+              </div>
+              <div className="col-foot">
+                <span>{c.hint}</span>
+                <b>
+                  {st ? (st.passed ? "Pass" : "Fail") : pending ? "…" : "—"}
+                  {timings[i] !== null && <small> / {(timings[i] as number).toFixed(2)}s</small>}
+                </b>
+              </div>
             </div>
           );
         })}
-    </pre>
+      </div>
+    </div>
   );
 }
 
-function Terminal({ lines }: { lines: RunState["log"] }) {
+/* ---------------- drawer ---------------- */
+
+function DrawerPanel({
+  kind: k,
+  run,
+  history,
+  onClose,
+  onSwitch,
+}: {
+  kind: Exclude<Drawer, null>;
+  run: RunState;
+  history: HistoryEntry[];
+  onClose: () => void;
+  onSwitch: (d: Drawer) => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const title = k === "diff" ? "Code & diff" : k === "proof" ? "Provenance" : "Engine log";
+  return (
+    <div className="drawer" role="dialog" aria-label={title}>
+      <div className="drawer-head">
+        <div className="drawer-tabs">
+          {(["diff", "proof", "log"] as const).map((d) => (
+            <button key={d} className={d === k ? "on" : ""} onClick={() => onSwitch(d)}>
+              {d === "diff" ? "Code & diff" : d === "proof" ? "Provenance" : "Log"}
+            </button>
+          ))}
+        </div>
+        <button className="icon-btn sm" onClick={onClose} aria-label="Close">
+          <i className="fa-solid fa-xmark" />
+        </button>
+      </div>
+      <div className="drawer-body">
+        {k === "diff" && <DiffPanel run={run} />}
+        {k === "proof" && <ProofPanel run={run} history={history} />}
+        {k === "log" && <LogPanel run={run} />}
+      </div>
+    </div>
+  );
+}
+
+function DiffPanel({ run }: { run: RunState }) {
+  const finding = run.findings[0];
+  const rows = (run.evidence?.content ?? "").split("\n").map((line) => {
+    const m = /^(\d+): ?(.*)$/.exec(line);
+    return m ? { n: Number(m[1]), text: m[2] } : { n: 0, text: line };
+  });
+  return (
+    <>
+      <h4>Evidence {run.evidence && <span>{run.evidence.file}:{run.evidence.start_line}–{run.evidence.end_line}</span>}</h4>
+      {run.evidence ? (
+        <pre className="code">
+          {rows.map((r) => (
+            <div key={r.n} className={r.n === finding?.line_start ? "hot" : ""}>
+              <span>{r.n}</span>
+              <code>{r.text || " "}</code>
+            </div>
+          ))}
+        </pre>
+      ) : (
+        <p className="none">No finding yet.</p>
+      )}
+      <h4>Patch {run.patch && <span>{run.patch.target_file}</span>}</h4>
+      {run.patch ? (
+        <pre className="code diff">
+          {run.patch.unified_diff
+            .split("\n")
+            .filter(Boolean)
+            .map((line, i) => (
+              <div key={i} className={line.startsWith("@@") ? "hunk" : line.startsWith("+++") || line.startsWith("---") ? "meta" : line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : ""}>
+                <code>{line}</code>
+              </div>
+            ))}
+        </pre>
+      ) : (
+        <p className="none">No patch yet.</p>
+      )}
+      {finding && (
+        <dl className="kv">
+          <dt>Rule</dt>
+          <dd>{finding.evidence[0]?.raw_reference}</dd>
+          <dt>Severity</dt>
+          <dd>{finding.severity}</dd>
+          {run.reasoning && (
+            <>
+              <dt>Class</dt>
+              <dd>{run.reasoning.vulnerability_class}</dd>
+            </>
+          )}
+        </dl>
+      )}
+    </>
+  );
+}
+
+function ProofPanel({ run, history }: { run: RunState; history: HistoryEntry[] }) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- provenance is a free-form JSON record
+  const p = run.artifacts?.provenance as Record<string, any> | undefined;
+  return (
+    <>
+      <h4>This run</h4>
+      {p ? (
+        <>
+          <dl className="kv">
+            <dt>Decision</dt>
+            <dd className={String(p.final_decision).toLowerCase()}>{p.final_decision}</dd>
+            <dt>Run ID</dt>
+            <dd>{p.run_id}</dd>
+            <dt>Repo SHA-256</dt>
+            <dd>{p.target?.repository_sha256}</dd>
+            <dt>Patch SHA-256</dt>
+            <dd>{p.patch?.patch_sha256}</dd>
+            <dt>Reasoning</dt>
+            <dd>
+              {p.reasoning?.provider} / {p.reasoning?.model}
+            </dd>
+            <dt>Original repo</dt>
+            <dd>{p.safety?.original_repository_modified ? "modified" : "untouched"}</dd>
+          </dl>
+          <div className="downloads">
+            <button onClick={() => download("vayu-provenance.json", p)}>
+              <i className="fa-solid fa-download" /> provenance.json
+            </button>
+            {run.artifacts?.sarif != null && (
+              <button onClick={() => download("vayu.sarif", run.artifacts?.sarif)}>
+                <i className="fa-solid fa-download" /> report.sarif
+              </button>
+            )}
+            {run.artifacts?.slsa != null && (
+              <button onClick={() => download("vayu-slsa.json", run.artifacts?.slsa)}>
+                <i className="fa-solid fa-signature" /> slsa.json
+              </button>
+            )}
+          </div>
+        </>
+      ) : (
+        <p className="none">Written when a run completes.</p>
+      )}
+      <h4>Recent runs</h4>
+      {history.length ? (
+        <ul className="runs">
+          {history.map((h) => (
+            <li key={h.id}>
+              <i className={h.decision.toLowerCase()} />
+              <b>{h.target}</b>
+              <span>{h.provider}</span>
+              <span className={h.decision.toLowerCase()}>{h.decision.toLowerCase()}</span>
+              <time>{new Date(h.when).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="none">None yet.</p>
+      )}
+    </>
+  );
+}
+
+function LogPanel({ run }: { run: RunState }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.scrollTo({ top: ref.current.scrollHeight });
-  }, [lines.length]);
+  }, [run.log.length]);
   return (
-    <div className="terminal" ref={ref} role="log" aria-live="polite">
-      {lines.length ? (
-        lines.map((l, i) => (
-          <div key={i} className={`log-${l.level}`}>
+    <div className="log" ref={ref} role="log" aria-live="polite">
+      {run.log.length ? (
+        run.log.map((l, i) => (
+          <div key={i} className={l.level}>
             <span>{l.t.toFixed(2)}</span>
             <p>{l.text}</p>
           </div>
         ))
       ) : (
-        <div className="log-dim">
-          <span>0.00</span>
-          <p>waiting for a run…</p>
-        </div>
+        <p className="none">Nothing yet.</p>
       )}
     </div>
   );
-}
-
-function Fact({ icon, tone, title, text }: { icon: string; tone: string; title: string; text: string }) {
-  return (
-    <div className="fact">
-      <i className={`fa-solid ${icon} ${tone}`} />
-      <div>
-        <b>{title}</b>
-        <p>{text}</p>
-      </div>
-    </div>
-  );
-}
-
-function Empty({ text }: { text: string }) {
-  return <p className="empty">{text}</p>;
 }

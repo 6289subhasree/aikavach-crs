@@ -149,7 +149,7 @@ function applyEvent(state: RunState, event: EngineEvent): RunState {
       const name = d.check as CheckName;
       return {
         ...s,
-        checks: { ...s.checks, [name]: { passed: !!d.passed, reason: String(d.reason ?? "") } },
+        checks: { ...s.checks, [name]: { passed: !!d.passed, reason: String(d.reason ?? ""), at: t } },
         log: push(s, d.passed ? "ok" : "error", `${CHECK_LABEL[name] ?? name} ${d.passed ? "passed" : "failed"} — ${d.reason}`, t),
       };
     }

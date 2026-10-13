@@ -3,10 +3,10 @@ export const STAGES: StageName[] = ["FIND", "REASON", "PATCH", "VERIFY"];
 
 export type CheckName = "build" | "tests" | "security_regression" | "static_rescan";
 export const CHECKS: { id: CheckName; label: string; icon: string; hint: string }[] = [
-  { id: "build", label: "Build", icon: "fa-cube", hint: "Patched code compiles" },
-  { id: "tests", label: "Tests", icon: "fa-vial", hint: "No functional regression" },
-  { id: "security_regression", label: "Exploit", icon: "fa-shield-halved", hint: "Vulnerable pattern gone" },
-  { id: "static_rescan", label: "Rescan", icon: "fa-satellite-dish", hint: "Semgrep confirms fix" },
+  { id: "build", label: "Build", icon: "fa-cube", hint: "Patched file compiles" },
+  { id: "tests", label: "Tests", icon: "fa-vial", hint: "Project test suite" },
+  { id: "security_regression", label: "Exploit", icon: "fa-bug-slash", hint: "Vulnerable call removed" },
+  { id: "static_rescan", label: "Rescan", icon: "fa-magnifying-glass-chart", hint: "Semgrep re-run" },
 ];
 
 export type Mode = "auto" | "ollama" | "offline";
@@ -87,6 +87,7 @@ export interface StageState {
 export interface CheckState {
   passed: boolean;
   reason: string;
+  at: number;
 }
 
 export interface LogLine {

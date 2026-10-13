@@ -125,9 +125,9 @@ artifacts/latest_run.json
 
 VAYU ships with a live web dashboard (`vayu-nextjs/`, route `/dashboard`) that runs the real pipeline and visualizes every stage as it happens:
 
-- **System field**: every line of the scanned repository drawn as dot-matrix code; a scan beam during FIND, the vulnerable line igniting with a pin, evidence links during REASON, the line rewriting during PATCH and one ring per verification check.
-- **Gauges and grids**: model confidence (labelled "not proof"), checks passed, pipeline-by-stage timeline, per-check verification tiles.
-- **Detail views**: the finding with its evidence window, AI reasoning, the unified diff, the engine log, and a Proof tab with the provenance record plus downloadable SARIF and a signed SLSA attestation.
+- **Codebase terrain**: a point-cloud map generated from the scanned repository. Files are laid out as a treemap and dense code rises into highlands; a finding shows as an orange hot zone that cools once a patch is proposed, with pins for files and the finding, and a callout listing root cause, impact, patch and verification.
+- **Around it**: code-intensity and nesting-depth charts, model-confidence and checks-passed gauges, a pipeline-by-stage dot grid, and per-check verification results with timings.
+- **Panels**: evidence window and unified diff, provenance with downloadable SARIF and a signed SLSA attestation, recent runs, and the engine log.
 
 ```bash
 pip install -r requirements.txt        # includes semgrep
