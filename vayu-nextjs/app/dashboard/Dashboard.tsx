@@ -330,7 +330,12 @@ export default function Dashboard() {
                 {pins === "findings" && <style>{`.terrain .pin:not(.pin-main){display:none}`}</style>}
               </>
             ) : (
-              <System run={run} hotFile={hotFile} hotLine={hotLine} onInspect={(n) => setInspect({ kind: "node", id: n })} />
+              <>
+                <div className="sys-backdrop" aria-hidden="true">
+                  <Terrain run={run} hotFile={hotFile} hotLine={hotLine} showPins={false} onHotspot={() => {}} />
+                </div>
+                <System run={run} hotFile={hotFile} hotLine={hotLine} onInspect={(n) => setInspect({ kind: "node", id: n })} />
+              </>
             )}
 
             <StatusPill run={run} />
