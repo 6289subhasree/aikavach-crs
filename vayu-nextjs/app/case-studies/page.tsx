@@ -36,12 +36,11 @@ export default function CaseStudies() {
           </p>
           <div className="rule" />
           <div className="abstract">
-            <span className="abstract-tag">Abstract</span>
             <p>
-              We present five realistic vulnerability classes that survive compilation, testing, and human review. In each, the defect is not visible on the line it occupies — it hides in
-              untrusted data, in timing, or in a seemingly benign default. For each case, VAYU locates the flaw, reasons about its root cause, synthesises the minimal patch, and
-              <em> proves the patch safe</em> inside an isolated sandbox before accepting it. A fix is admitted only when four independent checks pass — verification, not model confidence,
-              is the deciding authority. Toggle any listing between its vulnerable and verified-patched form.
+              <span className="abstract-tag">Abstract.</span> We present five realistic vulnerability classes that survive compilation, testing, and human review. In each, the defect is not
+              visible on the line it occupies — it hides in untrusted data, in timing, or in a seemingly benign default. For each case, VAYU locates the flaw, reasons about its root cause,
+              synthesises the minimal patch, and <em>proves the patch safe</em> inside an isolated sandbox before accepting it. A fix is admitted only when four independent checks pass:
+              verification, not model confidence, is the deciding authority. Toggle any listing between its vulnerable and verified-patched form.
             </p>
           </div>
           <a href="#cases" className="cs-scroll">
