@@ -18,7 +18,13 @@
   --sans: var(--font-sans, "Inter", system-ui, sans-serif);
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  min-height: 100vh;
+  /* globals.css locks <body> to one viewport for the landing hero, so this
+     page is its own scroll container (same approach as .dash). */
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
   background: var(--paper);
   color: var(--body);
   font-family: var(--serif);
@@ -481,6 +487,9 @@ figcaption {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .cs.paper {
+    scroll-behavior: auto;
+  }
   .cs.paper * {
     transition: none !important;
   }
