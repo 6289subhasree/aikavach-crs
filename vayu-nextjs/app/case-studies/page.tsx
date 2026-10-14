@@ -10,7 +10,7 @@ const CHECKS = ["Build", "Tests", "Exploit removed", "Rescan clean"];
 
 export default function CaseStudies() {
   return (
-    <div className="cs">
+    <div className="cs paper">
       <header className="cs-head">
         <Link href="/" className="cs-logo">
           vayu<span>&gt;</span>
@@ -27,39 +27,47 @@ export default function CaseStudies() {
         </Link>
       </header>
 
-      <section className="cs-hero">
-        <p className="cs-kicker">Case Studies</p>
-        <h1>
-          Five bugs that pass
-          <br />
-          code review.
-        </h1>
-        <p className="cs-sub">
-          Not textbook examples — these are the quiet ones. Each compiles, ships, and survives a human reviewer. VAYU finds each, reasons about the root cause, writes the minimal patch, and
-          <em> proves it safe</em> in an isolated sandbox before accepting it. Toggle any case between the vulnerable code and the verified fix.
-        </p>
-        <a href="#cases" className="cs-scroll">
-          Read the cases <i className="fa-solid fa-arrow-down" />
-        </a>
-      </section>
-
-      <section className="cs-list" id="cases">
-        {CASES.map((c, i) => (
-          <Case key={c.id} data={c} index={i} />
-        ))}
-      </section>
-
-      <footer className="cs-foot">
-        <div>
-          <b>The common thread</b>
-          <p>
-            Every one of these is invisible on the line it lives on — the danger is in data, in timing, or in a default. That is exactly why a verifier, not a confidence score, decides whether a fix is accepted.
+      <article className="paper-body">
+        <section className="masthead">
+          <p className="cs-kicker">Technical Note · Autonomous Remediation</p>
+          <h1>Five Vulnerabilities That Pass Code Review</h1>
+          <p className="byline">
+            AIKavach <b>VAYU</b> — Autonomous Cyber Reasoning System · Find → Reason → Patch → Verify
           </p>
-        </div>
-        <Link href="/dashboard" className="cs-cta">
-          See it run live
-        </Link>
-      </footer>
+          <div className="rule" />
+          <div className="abstract">
+            <span className="abstract-tag">Abstract</span>
+            <p>
+              We present five realistic vulnerability classes that survive compilation, testing, and human review. In each, the defect is not visible on the line it occupies — it hides in
+              untrusted data, in timing, or in a seemingly benign default. For each case, VAYU locates the flaw, reasons about its root cause, synthesises the minimal patch, and
+              <em> proves the patch safe</em> inside an isolated sandbox before accepting it. A fix is admitted only when four independent checks pass — verification, not model confidence,
+              is the deciding authority. Toggle any listing between its vulnerable and verified-patched form.
+            </p>
+          </div>
+          <a href="#cases" className="cs-scroll">
+            Read the cases <i className="fa-solid fa-arrow-down" />
+          </a>
+        </section>
+
+        <section className="cs-list" id="cases">
+          {CASES.map((c, i) => (
+            <Case key={c.id} data={c} index={i} />
+          ))}
+        </section>
+
+        <section className="conclusion">
+          <h2>
+            <span className="sec-no">6</span> Discussion
+          </h2>
+          <p>
+            Every case above is invisible on the line it lives on — the danger is in data, in timing, or in a default configuration. That is precisely why a deterministic verifier, rather than
+            a confidence score, must decide whether a proposed fix is accepted. VAYU treats the model as a source of hypotheses and the sandbox as the arbiter of truth.
+          </p>
+          <Link href="/dashboard" className="cs-cta inline">
+            See the loop run live →
+          </Link>
+        </section>
+      </article>
     </div>
   );
 }
@@ -69,39 +77,35 @@ function Case({ data, index }: { data: CaseStudy; index: number }) {
   const lines = view === "vuln" ? data.vulnerable : data.patched;
 
   return (
-    <article className="case">
+    <section className="case">
       <div className="case-meta">
         <div className="case-top">
-          <span className="case-no">{String(index + 1).padStart(2, "0")}</span>
+          <span className="sec-no">{index + 1}</span>
+          <h2>{data.title}</h2>
+        </div>
+        <div className="tags">
           <span className={`sev sev-${data.severity.toLowerCase()}`}>{data.severity}</span>
           <span className="cwe">{data.cwe}</span>
+          <span className="case-file">
+            <i className="fa-regular fa-file-code" /> {data.file}
+          </span>
         </div>
-        <h2>{data.title}</h2>
-        <p className="case-file">
-          <i className="fa-regular fa-file-code" /> {data.file}
-        </p>
 
         <div className="case-block">
-          <span className="case-label impact">
-            <i className="fa-solid fa-burst" /> Impact
-          </span>
+          <span className="case-label">Impact</span>
           <p>{data.impact}</p>
         </div>
         <div className="case-block">
-          <span className="case-label subtle">
-            <i className="fa-solid fa-user-secret" /> Why it passes review
-          </span>
+          <span className="case-label">Why it passes review</span>
           <p>{data.whySubtle}</p>
         </div>
         <div className="case-block">
-          <span className="case-label real">
-            <i className="fa-solid fa-landmark" /> In the wild
-          </span>
+          <span className="case-label">In the wild</span>
           <p>{data.realWorld}</p>
         </div>
       </div>
 
-      <div className="case-code">
+      <figure className="case-code">
         <div className="code-bar">
           <div className="code-toggle" role="tablist">
             <button role="tab" aria-selected={view === "vuln"} className={view === "vuln" ? "on vuln" : ""} onClick={() => setView("vuln")}>
@@ -144,7 +148,10 @@ function Case({ data, index }: { data: CaseStudy; index: number }) {
             </div>
           </div>
         )}
-      </div>
-    </article>
+        <figcaption>
+          Listing {index + 1}. {view === "vuln" ? "Vulnerable implementation" : "Verified patch"} — {data.file}
+        </figcaption>
+      </figure>
+    </section>
   );
 }
