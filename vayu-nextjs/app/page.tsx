@@ -107,7 +107,7 @@ export default function Home() {
           <nav className="desktop-nav">
             <a href="#" className="nav-link active">Home</a>
             <Link href="/dashboard" className="nav-link">Dashboard</Link>
-            <a href="#" className="nav-link">Case Studies</a>
+            <Link href="/case-studies" className="nav-link">Case Studies</Link>
             <a href="#" className="nav-link">Contact</a>
           </nav>
           <button 
@@ -183,7 +183,7 @@ export default function Home() {
         <nav className="mobile-nav">
           <a href="#" className="nav-link active anim-mob" onClick={closeMenu}>Home</a>
           <Link href="/dashboard" className="nav-link anim-mob" onClick={closeMenu}>Dashboard</Link>
-          <a href="#" className="nav-link anim-mob" onClick={closeMenu}>Case Studies</a>
+          <Link href="/case-studies" className="nav-link anim-mob" onClick={closeMenu}>Case Studies</Link>
           <a href="#" className="nav-link anim-mob" onClick={closeMenu}>Contact</a>
         </nav>
       </div>

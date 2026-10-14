@@ -121,6 +121,10 @@ artifacts/latest_run.json
 
 ---
 
+## Landing & case studies
+
+The landing page (`vayu-nextjs/`, route `/`) links to a **Case Studies** page (`/case-studies`) with five real, subtle vulnerability classes — archive path traversal (CVE-2007-4559), unsafe YAML deserialization (CWE-502), a timing side channel (CWE-208), XML external entities (CWE-611) and command injection (CWE-78) — each with a vulnerable/patched toggle and the four-check verified stamp.
+
 ## Dashboard
 
 VAYU ships with a live web dashboard (`vayu-nextjs/`, route `/dashboard`) that runs the real pipeline and visualizes every stage as it happens:
